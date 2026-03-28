@@ -1,0 +1,52 @@
+{
+  "dataset": {
+    "total_records": 1105056,
+    "date_range": "2015-08-01 00:00:00 to 2026-01-31 23:55:00",
+    "duration_days": 3836,
+    "duration_years": 10.5,
+    "valid_events": 491,
+    "nan_count": 0,
+    "resolution_minutes": 5
+  },
+  "stormflow_distribution": {
+    "zero_pct": 0.3,
+    "negative_pct": 26.4,
+    "positive_pct": 73.3,
+    "P50": 0.1091,
+    "P75": 0.2554,
+    "P90": 0.7713,
+    "P95": 1.9714,
+    "P99": 12.8159,
+    "P99.9": 50.9801,
+    "max": 225.3305,
+    "ratio_max_to_P95": 114.3,
+    "ratio_max_to_median": 2065.4
+  },
+  "cross_correlation_rain_to_stormflow": {
+    "optimal_lag_minutes": 10,
+    "max_correlation": 0.6372,
+    "correlation_at_30min": 0.4522,
+    "correlation_at_1h": 0.3781,
+    "correlation_at_2h": 0.2295
+  },
+  "seasonality": {
+    "events_per_month_range": "29-47",
+    "highest_mean_stormflow_month": "February (0.7046 MGD)",
+    "highest_peak_month": "April (225.33 MGD)"
+  },
+  "correlations": {
+    "rain_vs_stormflow": 0.519,
+    "flow_vs_stormflow": 0.998,
+    "baseflow_vs_rain": 0.016,
+    "baseflow_vs_stormflow": 0.05
+  },
+  "key_insights": [
+    "26.4% of stormflow values are negative (sensor artifact) - needs cleaning",
+    "Extreme imbalance: max is 114x the P95 value",
+    "Very fast catchment response: optimal lag only 10 minutes",
+    "Correlation drops to 0.23 at 2h lag - short context window sufficient",
+    "491 valid events across 10.5 years gives good training data",
+    "Seasonality is moderate - events distributed fairly evenly across months",
+    "flow_total and stormflow are nearly identical (r=0.998)"
+  ]
+}
