@@ -1,4 +1,4 @@
-"""Evaluation metrics for stormflow prediction."""
+﻿"""Evaluation metrics for stormflow prediction."""
 
 from __future__ import annotations  # Permite anotaciones modernas sin conflictos de version
 
@@ -36,7 +36,7 @@ def _safe_nse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
 
 def _bucket_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, Dict[str, float]]:
     """Compute severity bucket metrics using proposal-defined thresholds."""
-    buckets = {  # Define cortes de severidad segun la propuesta (seccion 4.4)
+    buckets = {  # Define cortes de severidad segun la propuesta del proyecto
         "base": (None, 0.5),  # Bucket base para valores inferiores a 0.5 MGD
         "pequeno": (0.5, 2.0),  # Bucket pequeno para rango 0.5 a 2 MGD
         "moderado": (2.0, 12.8),  # Bucket moderado para rango 2 a 12.8 MGD
@@ -90,6 +90,8 @@ def evaluate_model(
 
     y_real = denormalize_target(y_real_norm, norm_params)  # Lleva target real desde escala normalizada a unidades fisicas MGD
     y_pred = denormalize_target(y_pred_norm, norm_params)  # Lleva prediccion desde escala normalizada a unidades fisicas MGD
+    y_real = np.clip(y_real, a_min=0.0, a_max=None)  # Refuerza restriccion fisica de stormflow no negativo en las metricas finales
+    y_pred = np.clip(y_pred, a_min=0.0, a_max=None)  # Evita que una salida numericamente negativa distorsione las metricas fisicas
 
     global_nse = _safe_nse(y_real, y_pred)  # Calcula NSE global en unidades reales
     global_rmse = _safe_rmse(y_real, y_pred)  # Calcula RMSE global en MGD
@@ -109,10 +111,12 @@ def evaluate_model(
         peak_error_pct = float("nan")  # Marca error porcentual como no definido
 
     event_nse = float("nan")  # Inicializa NSE en eventos como NaN por defecto cuando no se pasa mascara
+    event_sample_count = 0.0  # Inicializa contador de muestras de evento para trazabilidad de la metrica
     if is_event is not None:  # Verifica si se solicito evaluacion restringida a eventos
         event_mask = np.asarray(is_event).reshape(-1).astype(bool)  # Convierte mascara de evento a bool 1D
         if event_mask.shape[0] != y_real.shape[0]:  # Valida alineacion entre mascara y arrays de prediccion/real
             raise ValueError("is_event must have the same length as y_real_norm and y_pred_norm")  # Lanza error claro ante longitudes incompatibles
+        event_sample_count = float(event_mask.sum())  # Cuenta cuantas muestras del vector evaluado pertenecen a eventos reales
         event_nse = _safe_nse(y_real[event_mask], y_pred[event_mask])  # Calcula NSE solo en muestras marcadas como evento
 
     severity_metrics = _bucket_metrics(y_true=y_real, y_pred=y_pred)  # Calcula desglose de metricas por buckets de severidad
@@ -128,8 +132,9 @@ def evaluate_model(
             "peak_abs_error_mgd": peak_abs_error_mgd,
             "peak_error_pct": peak_error_pct,
         },
-        "event_only": {  # Agrupa metrica restringida a eventos para evaluar desempeno operativo
+        "event_only": {  # Agrupa metricas restringidas a eventos para evaluar desempeno operativo
             "nse": event_nse,
+            "n_samples": event_sample_count,
         },
         "severity": severity_metrics,  # Incluye desglose completo por buckets de severidad
     }
@@ -142,7 +147,7 @@ def evaluate_model(
     print(f"[metrics] Pico predicho: {pred_peak_value:.4f} MGD")  # Imprime valor predicho del pico global
     print(f"[metrics] Error pico: {peak_error_mgd:.4f} MGD ({peak_error_pct:.2f}%)")  # Imprime error signed de pico en MGD y porcentaje
     if is_event is not None:  # Imprime metrica de eventos solo si se proporciono mascara
-        print(f"[metrics] NSE (eventos): {event_nse:.4f}")  # Reporta NSE restringido al subconjunto de eventos
+        print(f"[metrics] NSE (eventos): {event_nse:.4f} | muestras: {int(event_sample_count)}")  # Reporta NSE restringido al subconjunto de eventos y su cobertura
 
     print("[metrics] === Desglose por Severidad ===")  # Encabezado de impresion para buckets de severidad
     for bucket_name, bucket_values in severity_metrics.items():  # Recorre cada bucket para imprimir sus metricas

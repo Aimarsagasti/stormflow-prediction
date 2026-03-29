@@ -1,9 +1,8 @@
-# Hiperpar?metros del proyecto
+﻿# Hiperparametros del proyecto
 # =============================================================================
-# Configuración del proyecto Stormflow Prediction
+# Configuracion del proyecto Stormflow Prediction
 # =============================================================================
 
-# ─── Rutas a los datos (Google Drive montado en Colab) ──────────────
 data:
   base_paths:
     - '/content/drive/MyDrive/Proyecto de capstone/Archivos del proyecto/Largos/MC-CL-005/1parte/'
@@ -14,38 +13,10 @@ data:
     flow: 'flow_list.tsf'
     stormflow: 'lstStormTs.tsf'
 
-# ─── Rutas de salida ────────────────────────────────────────────────
 outputs:
   data_analysis: 'outputs/data_analysis/'
   models: 'outputs/models/'
   figures: 'outputs/figures/'
 
-# ─── Proyecto GitHub ────────────────────────────────────────────────
 project:
   project_dir: '/content/stormflow-prediction'
-```
-
-Guarda con Ctrl+S. Luego haz commit y push:
-```
-git add configs/default.yaml
-git commit -m "Rellenar default.yaml con rutas y configuración"
-git push
-```
-
-Ahora sí, la instrucción para Codex queda más limpia. Quita la parte de "también actualiza default.yaml" y déjala así:
-```
-Lee AGENTS.md para entender el proyecto y configs/default.yaml para ver 
-las rutas a los datos.
-
-Crea src/data/load.py que implemente la carga de datos del MSD:
-
-1. Leer las rutas desde configs/default.yaml usando pyyaml
-2. Cargar archivos .tsf (formato: 3 líneas cabecera + datos tab-separated, 
-  columnas datetime y valor)
-3. Cargar archivo de eventos .dat (formato: pipe-separated, 32 campos + 
-  trailing pipe vacío sin cabecera)
-4. Concatenar las dos partes del dataset
-5. Eliminar duplicados temporales
-6. Calcular baseflow = flow_total - stormflow
-
-El código será ejecutado en Google Colab con datos en Google Drive.

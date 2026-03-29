@@ -1,4 +1,4 @@
-"""Feature engineering utilities for MSD stormflow modeling."""
+﻿"""Feature engineering utilities for MSD stormflow modeling."""
 
 from __future__ import annotations  # Permite anotaciones modernas de tipos con compatibilidad amplia
 
@@ -45,13 +45,13 @@ def _add_rain_features(df_feat: pd.DataFrame, resolution_minutes: int) -> pd.Dat
 
 def create_features(df_clean: pd.DataFrame) -> pd.DataFrame:
     """Create model features, target, and auxiliary columns from cleaned time series."""
-    required_columns = ["timestamp", "rain_in", "flow_total_mgd", "baseflow_mgd", "stormflow_mgd", "is_event"]  # Define columnas minimas para construir features
+    required_columns = ["timestamp", "rain_in", "flow_total_mgd", "stormflow_mgd", "is_event"]  # Define solo columnas necesarias para una version mas operativa del modelo
     missing_columns = [column for column in required_columns if column not in df_clean.columns]  # Detecta columnas faltantes en entrada
     if missing_columns:  # Valida esquema para fallar con mensaje claro en Colab
         raise ValueError(f"Missing required columns for feature engineering: {missing_columns}")  # Lanza error explicito para facilitar depuracion
 
     df_feat = df_clean.copy()  # Trabaja sobre copia para no mutar la salida de limpieza
-    df_feat["timestamp"] = pd.to_datetime(df_feat["timestamp"], errors="coerce")  # Asegura tipo datetime para derivar se?ales temporales
+    df_feat["timestamp"] = pd.to_datetime(df_feat["timestamp"], errors="coerce")  # Asegura tipo datetime para derivar senales temporales
     df_feat = df_feat.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)  # Elimina timestamps invalidos y ordena cronologicamente
     resolution_minutes = _infer_resolution_minutes(df_feat["timestamp"])  # Estima resolucion para convertir ventanas en minutos a pasos
 
@@ -61,11 +61,6 @@ def create_features(df_clean: pd.DataFrame) -> pd.DataFrame:
     steps_15m = max(int(15 / resolution_minutes), 1)  # Traduce 15 minutos al numero de pasos de la serie
     df_feat["delta_flow_5m"] = df_feat["flow_total_mgd"].diff(periods=steps_5m).fillna(0.0)  # Calcula variacion de flow_total en 5 minutos
     df_feat["delta_flow_15m"] = df_feat["flow_total_mgd"].diff(periods=steps_15m).fillna(0.0)  # Calcula variacion de flow_total en 15 minutos
-    df_feat["delta_stormflow_5m"] = df_feat["stormflow_mgd"].diff(periods=steps_5m).fillna(0.0)  # Calcula variacion de stormflow en 5 minutos
-    df_feat["delta_stormflow_15m"] = df_feat["stormflow_mgd"].diff(periods=steps_15m).fillna(0.0)  # Calcula variacion de stormflow en 15 minutos
-
-    safe_flow = df_feat["flow_total_mgd"].clip(lower=0.001)  # Evita division por cero con piso pequeno solicitado
-    df_feat["stormflow_flow_ratio"] = df_feat["stormflow_mgd"] / safe_flow  # Crea ratio stormflow sobre flow_total con denominador seguro
 
     hour_fraction = (df_feat["timestamp"].dt.hour + (df_feat["timestamp"].dt.minute / 60.0)) / 24.0  # Convierte hora del dia a fase continua
     df_feat["hour_sin"] = np.sin(2.0 * np.pi * hour_fraction)  # Codifica fase horaria en seno para capturar periodicidad
@@ -78,7 +73,6 @@ def create_features(df_clean: pd.DataFrame) -> pd.DataFrame:
     feature_columns = [  # Enumera columnas de entrada que iran al modelo
         "rain_in",  # Mantiene lluvia base como feature primaria causal
         "flow_total_mgd",  # Mantiene flujo total por su alta correlacion con stormflow
-        "baseflow_mgd",  # Mantiene componente base para separar dinamicas sanitarias
         "rain_sum_10m",  # Acumulado de lluvia en ventana corta de respuesta rapida
         "rain_sum_15m",  # Acumulado de lluvia en 15 minutos
         "rain_sum_30m",  # Acumulado de lluvia en media hora
@@ -91,9 +85,6 @@ def create_features(df_clean: pd.DataFrame) -> pd.DataFrame:
         "minutes_since_last_rain",  # Recencia de lluvia con cap de 24 horas
         "delta_flow_5m",  # Tendencia corta de flow_total en 5 minutos
         "delta_flow_15m",  # Tendencia corta de flow_total en 15 minutos
-        "delta_stormflow_5m",  # Tendencia corta de stormflow en 5 minutos
-        "delta_stormflow_15m",  # Tendencia corta de stormflow en 15 minutos
-        "stormflow_flow_ratio",  # Ratio de componente de tormenta respecto al flujo total
         "hour_sin",  # Componente ciclica senoidal horaria
         "hour_cos",  # Componente ciclica cosenoidal horaria
         "month_sin",  # Componente ciclica senoidal mensual
