@@ -29,6 +29,15 @@ class CausalConv1d(nn.Module):
         return x  # Devuelve salida causal con la misma longitud temporal que la entrada
 
 
+def _build_group_norm(num_channels: int) -> nn.GroupNorm:
+    """Build GroupNorm with a valid number of groups for the channel count."""
+    candidate_groups = [8, 4, 2, 1]  # Prueba grupos tipicos para mantener normalizacion estable sin depender del batch
+    for num_groups in candidate_groups:  # Recorre posibles grupos hasta encontrar uno compatible con los canales actuales
+        if num_channels % num_groups == 0:  # Verifica divisibilidad exacta requerida por GroupNorm
+            return nn.GroupNorm(num_groups=num_groups, num_channels=num_channels)  # Devuelve normalizacion estable para el ancho actual
+    return nn.GroupNorm(num_groups=1, num_channels=num_channels)  # Fallback seguro equivalente a LayerNorm por canal
+
+
 class TCNResidualBlock(nn.Module):
     """Residual TCN block with two dilated causal convolutions."""
 
@@ -47,7 +56,7 @@ class TCNResidualBlock(nn.Module):
             kernel_size=kernel_size,  # Usa kernel definido para toda la arquitectura
             dilation=dilation,  # Usa dilatacion del bloque para cubrir diferente escala temporal
         )
-        self.bn1 = nn.BatchNorm1d(out_channels)  # Normaliza activaciones por canal para entrenamiento mas estable
+        self.norm1 = _build_group_norm(out_channels)  # Normaliza por grupos para evitar drift con batches estratificados
         self.relu1 = nn.ReLU()  # Introduce no linealidad tras la primera convolucion
         self.drop1 = nn.Dropout(dropout)  # Regulariza activaciones para reducir sobreajuste
 
@@ -57,7 +66,7 @@ class TCNResidualBlock(nn.Module):
             kernel_size=kernel_size,  # Repite tamano de kernel del bloque
             dilation=dilation,  # Repite dilatacion para consistencia multiescala dentro del bloque
         )
-        self.bn2 = nn.BatchNorm1d(out_channels)  # Normaliza segunda salida convolucional
+        self.norm2 = _build_group_norm(out_channels)  # Repite GroupNorm para estabilizar la segunda transformacion del bloque
         self.relu2 = nn.ReLU()  # Aplica no linealidad en segunda transformacion
         self.drop2 = nn.Dropout(dropout)  # Aplica regularizacion adicional en la segunda capa
 
@@ -72,12 +81,12 @@ class TCNResidualBlock(nn.Module):
         residual = self.skip_proj(x)  # Construye rama residual alineada en canales con la salida principal
 
         out = self.conv1(x)  # Ejecuta primera convolucion causal
-        out = self.bn1(out)  # Normaliza salida de la primera convolucion
+        out = self.norm1(out)  # Normaliza salida de la primera convolucion sin depender del batch
         out = self.relu1(out)  # Activa salida intermedia para modelar relaciones no lineales
         out = self.drop1(out)  # Aplica dropout en activaciones intermedias
 
         out = self.conv2(out)  # Ejecuta segunda convolucion causal del bloque
-        out = self.bn2(out)  # Normaliza segunda salida convolucional
+        out = self.norm2(out)  # Normaliza segunda salida convolucional con GroupNorm
         out = self.relu2(out)  # Activa segunda salida intermedia
         out = self.drop2(out)  # Aplica dropout final antes de la suma residual
 
@@ -129,7 +138,7 @@ class StormflowTCN(nn.Module):
 
         final_channels = self.num_channels[-1]  # Obtiene canales finales tras el ultimo bloque TCN
         self.head = nn.Sequential(  # Define cabeza MLP para llevar embedding temporal a prediccion escalar
-            nn.Linear(final_channels, 64),  # Reduce/expande representacion final a dimension intermedia
+            nn.Linear(final_channels, 64),  # Proyecta representacion final a una capa intermedia compacta
             nn.ReLU(),  # Introduce no linealidad antes de la capa final
             nn.Dropout(self.dropout),  # Aplica regularizacion ligera en la cabeza del modelo
             nn.Linear(64, 1),  # Proyecta a salida escalar de stormflow normalizado
@@ -142,7 +151,7 @@ class StormflowTCN(nn.Module):
         x = x.transpose(1, 2)  # Reordena a (batch, n_features, seq_length) para Conv1d de PyTorch
         x = self.input_projection(x)  # Proyecta features de entrada al espacio de canales de la TCN
         x = self.tcn_blocks(x)  # Procesa secuencia con bloques residuales causales multiescala
-        x = x.mean(dim=-1)  # Aplica Global Average Pooling temporal para resumir historia en embedding fijo
+        x = x[:, :, -1]  # Usa solo el ultimo timestep causal, que resume la historia relevante para la prediccion futura
         x = self.head(x)  # Genera prediccion escalar final con la cabeza MLP
         return x  # Devuelve tensor con shape (batch, 1)
 

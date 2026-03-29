@@ -11,12 +11,18 @@ import pandas as pd  # Provee DataFrames para transformar cada split
 EPSILON = 1e-12  # Evita divisiones por cero cuando una columna es constante
 
 
-def _get_log_columns(feature_columns: List[str]) -> List[str]:
+def _get_log_columns(
+    feature_columns: List[str],
+    target_col: str,
+    apply_log1p_to_target: bool,
+) -> List[str]:
     """Return skewed columns that should receive log1p before Min-Max."""
     log_columns = []  # Acumula columnas sesgadas para transformacion logaritmica
     for column_name in feature_columns:  # Recorre cada feature candidata de entrada
         if column_name == "rain_in" or column_name.startswith("rain_sum_"):  # Selecciona lluvia base y acumulados segun proposal.md
             log_columns.append(column_name)  # Guarda columna para aplicar log1p antes del escalado
+    if apply_log1p_to_target:  # Permite comprimir tambien la cola extrema del target cuando asi se configure
+        log_columns.append(target_col)  # Agrega target a la lista de columnas transformadas con log1p
     return log_columns  # Devuelve lista final de columnas transformadas
 
 
@@ -44,12 +50,17 @@ def normalize_splits(
     df_test: pd.DataFrame,
     feature_columns: List[str],
     target_col: str = "stormflow_mgd",
+    apply_log1p_to_target: bool = True,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, object]]:
     """Normalize train/val/test with train-only Min-Max stats and optional log1p."""
     if target_col not in df_train.columns:  # Valida que el target exista en train para calcular sus estadisticas
         raise ValueError(f"Target column '{target_col}' not found in train split")  # Da mensaje explicito para depuracion rapida
 
-    log_columns = _get_log_columns(feature_columns)  # Define columnas sesgadas que se transforman con log1p
+    log_columns = _get_log_columns(  # Define columnas sesgadas que se transforman con log1p
+        feature_columns=feature_columns,  # Pasa features del modelo para detectar lluvia/acumulados sesgados
+        target_col=target_col,  # Pasa nombre del target por si tambien se debe comprimir
+        apply_log1p_to_target=apply_log1p_to_target,  # Indica si el target entra o no en transformacion logaritmica
+    )
 
     train_transformed = _apply_log_transform(df_train, log_columns)  # Transforma train antes de calcular min/max segun el pipeline propuesto
     val_transformed = _apply_log_transform(df_val, log_columns)  # Aplica misma transformacion en validacion para mantener consistencia
@@ -78,6 +89,7 @@ def normalize_splits(
         "feature_columns": list(feature_columns),  # Conserva orden de features para reconstruir tensores luego
         "target_col": target_col,  # Guarda nombre del target normalizado
         "log1p_columns": log_columns,  # Lista columnas que recibieron transformacion log1p
+        "apply_log1p_to_target": apply_log1p_to_target,  # Guarda bandera explicita para trazabilidad del target
         "min": stats_min,  # Diccionario de minimos por columna
         "max": stats_max,  # Diccionario de maximos por columna
         "range": stats_range,  # Diccionario de rangos por columna
@@ -89,6 +101,18 @@ def normalize_splits(
     print(f"[normalize] Shape test_norm: {df_test_norm.shape}")  # Reporta dimensiones finales de test normalizado
 
     return df_train_norm, df_val_norm, df_test_norm, norm_params  # Devuelve splits normalizados y parametros para inferencia/desnormalizacion
+
+
+def normalize_target_values(values: np.ndarray, norm_params: Dict[str, object]) -> np.ndarray:
+    """Convert raw target values in MGD into the normalized training scale."""
+    target_col = str(norm_params["target_col"])  # Recupera nombre del target para acceder a sus parametros de transformacion
+    values_array = np.asarray(values, dtype=float)  # Convierte valores entrantes a arreglo numpy para transformar en bloque
+    if target_col in norm_params.get("log1p_columns", []):  # Revisa si el target se comprimio con log1p al normalizar
+        values_array = np.log1p(np.clip(values_array, a_min=0.0, a_max=None))  # Reproduce la misma transformacion sobre valores reales no negativos
+    target_min = float(norm_params["min"][target_col])  # Extrae minimo usado en Min-Max del target
+    target_range = float(norm_params["range"][target_col])  # Extrae rango usado en Min-Max del target
+    normalized_values = (values_array - target_min) / target_range  # Lleva los valores al mismo espacio de entrenamiento del modelo
+    return normalized_values  # Devuelve arreglo listo para comparar con y_true/y_pred normalizados
 
 
 def denormalize_target(y_norm: np.ndarray, norm_params: Dict[str, object]) -> np.ndarray:
