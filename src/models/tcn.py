@@ -1,4 +1,4 @@
-﻿"""TCN model definitions for stormflow prediction."""
+"""TCN model definitions for stormflow prediction."""
 
 from __future__ import annotations  # Permite anotaciones modernas de tipos sin problemas de version
 
@@ -124,6 +124,7 @@ class StormflowTCN(nn.Module):
         dilations: Sequence[int] | None = None,
         kernel_size: int = 3,
         dropout: float = 0.2,
+        gate_temperature: float = 1.5,
     ) -> None:
         super().__init__()  # Inicializa la clase base para registrar submodulos correctamente
         self.n_features = n_features  # Guarda numero de features de entrada para referencia y depuracion
@@ -131,6 +132,7 @@ class StormflowTCN(nn.Module):
         self.dilations = list(dilations) if dilations is not None else [1, 2, 4, 8, 16]  # Define dilataciones por bloque segun propuesta
         self.kernel_size = kernel_size  # Guarda kernel temporal para metodos de campo receptivo
         self.dropout = dropout  # Guarda dropout global para bloques y cabezas
+        self.gate_temperature = max(float(gate_temperature), 1e-3)  # Guarda temperatura positiva para suavizar la conversion logit->probabilidad
 
         if len(self.num_channels) != len(self.dilations):  # Verifica consistencia entre numero de bloques y dilataciones
             raise ValueError("num_channels and dilations must have the same length")  # Lanza error claro si hay configuracion inconsistente
@@ -188,7 +190,7 @@ class StormflowTCN(nn.Module):
         event_logit = self.event_head(shared_features)  # Calcula evidencia escalar de si habra evento en el horizonte objetivo
         magnitude_raw = self.magnitude_head(shared_features)  # Calcula magnitud potencial antes de imponer no negatividad
         magnitude_prediction = F.softplus(magnitude_raw)  # Garantiza una magnitud no negativa y suave para la rama de regresion
-        event_probability = torch.sigmoid(event_logit)  # Convierte el logit en probabilidad interpretable de evento
+        event_probability = torch.sigmoid(event_logit / self.gate_temperature)  # Suaviza el gate para reducir compresion excesiva de picos con incertidumbre intermedia
         stormflow_prediction = magnitude_prediction * event_probability  # Suprime falsas alarmas cuando la probabilidad de evento es baja
 
         return {  # Devuelve todas las salidas utiles para perdida, inferencia y diagnostico

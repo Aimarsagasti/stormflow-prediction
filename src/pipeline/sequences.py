@@ -1,4 +1,4 @@
-﻿"""Sequence and DataLoader utilities for MSD stormflow modeling."""
+"""Sequence and DataLoader utilities for MSD stormflow modeling."""
 
 from __future__ import annotations  # Permite anotaciones de tipos modernas con buena compatibilidad
 
@@ -97,10 +97,10 @@ def _compute_sample_weights(y_array: np.ndarray, event_array: np.ndarray, thresh
     p999 = thresholds["p999"]  # Recupera umbral P99.9 calculado sobre train para consistencia entre splits
 
     sample_weights = np.ones_like(y_array, dtype=np.float32)  # Inicializa pesos base para el regimen dominante de baja magnitud
-    sample_weights[event_array] = np.maximum(sample_weights[event_array], 2.5)  # Da mas importancia a eventos aun cuando la magnitud futura todavia es modesta
-    sample_weights[(y_array >= p95) & (y_array < p99)] = 6.0  # Aumenta peso para cola alta sin llegar al rango extremo
+    sample_weights[event_array] = np.maximum(sample_weights[event_array], 1.75)  # Da un refuerzo leve a eventos genericos sin dominar sobre la magnitud real futura
+    sample_weights[(y_array >= p95) & (y_array < p99)] = 5.0  # Aumenta peso para cola alta sin sobrerreaccionar en severidad intermedia
     sample_weights[(y_array >= p99) & (y_array < p999)] = 12.0  # Aumenta mas el peso para cola muy alta donde la infraestimacion es costosa
-    sample_weights[y_array >= p999] = 20.0  # Da maxima prioridad a extremos de magnitud critica
+    sample_weights[y_array >= p999] = 24.0  # Da maxima prioridad a extremos de magnitud critica para el objetivo operativo
     return sample_weights  # Devuelve vector de pesos por muestra alineado al target
 
 
@@ -136,7 +136,7 @@ def _build_single_loader(
         seq_length=seq_length,  # Usa longitud de historia definida para el modelo
         horizon=horizon,  # Usa horizonte objetivo definido para la prediccion
     )
-    sample_weight_array = _compute_sample_weights(y_array=y_array, event_array=event_array, thresholds=thresholds)  # Calcula pesos con umbrales fijos de train y prioridad explicita a eventos
+    sample_weight_array = _compute_sample_weights(y_array=y_array, event_array=event_array, thresholds=thresholds)  # Calcula pesos con umbrales fijos de train y prioridad explicita a magnitud futura
     event_pos_weight = _compute_event_pos_weight(event_array)  # Calcula peso de la clase positiva para BCE en este split
 
     dataset = StormflowSequenceDataset(  # Envuelve arreglos en dataset PyTorch con supervision multitarea
@@ -160,6 +160,8 @@ def _build_single_loader(
         "event_windows": int(event_array.sum()),  # Guarda numero de ventanas cuya etiqueta objetivo es evento
         "event_rate": float(event_array.mean()) if event_array.size > 0 else float("nan"),  # Guarda tasa natural de eventos a ese horizonte
         "event_pos_weight": float(event_pos_weight),  # Guarda peso sugerido para BCE de evento
+        "peak_windows_p95": int((y_array >= thresholds["p95"]).sum()) if y_array.size > 0 else 0,  # Guarda cuantas ventanas pertenecen a la cola >= P95
+        "peak_windows_p99": int((y_array >= thresholds["p99"]).sum()) if y_array.size > 0 else 0,  # Guarda cuantas ventanas pertenecen a la cola >= P99
         "thresholds": thresholds,  # Guarda umbrales P95/P99/P99.9 usados en pesos y diagnosticos
         "shuffle": bool(shuffle),  # Registra si el loader mezcla o preserva orden temporal
     }
@@ -208,7 +210,7 @@ def create_dataloaders(
         df_split=df_test,  # Usa split de test en orden cronologico
         feature_columns=feature_columns,  # Pasa columnas de entrada
         target_col=target_col,  # Pasa nombre del target normalizado
-        aux_col=aux_col,  # Pasa bandera auxiliar para diagnosticos posteriores
+        aux_col=aux_col,  # Pasa bandera auxiliar de evento para diagnosticos posteriores
         seq_length=seq_length,  # Pasa longitud de secuencia definida
         horizon=horizon,  # Pasa horizonte objetivo
         batch_size=batch_size,  # Pasa tamano de batch para inferencia/evaluacion
@@ -221,8 +223,8 @@ def create_dataloaders(
     print(f"[sequences] Test  X shape: {test_diag['x_shape']} | y shape: {test_diag['y_shape']} | batches: {test_diag['num_batches']}")  # Reporta tamanos de test
 
     print(f"[sequences] Event rate(train): {train_diag['event_rate']:.4f} | event BCE pos_weight: {train_diag['event_pos_weight']:.4f}")  # Imprime desbalance natural de eventos en train para configurar la loss
-    print(f"[sequences] Event rate(val): {val_diag['event_rate']:.4f} | event windows: {val_diag['event_windows']}")  # Imprime cobertura de eventos en validacion
-    print(f"[sequences] Event rate(test): {test_diag['event_rate']:.4f} | event windows: {test_diag['event_windows']}")  # Imprime cobertura de eventos en test
+    print(f"[sequences] Event rate(val): {val_diag['event_rate']:.4f} | event windows: {val_diag['event_windows']} | p95+ windows: {val_diag['peak_windows_p95']}")  # Imprime cobertura de eventos y cola alta en validacion
+    print(f"[sequences] Event rate(test): {test_diag['event_rate']:.4f} | event windows: {test_diag['event_windows']} | p95+ windows: {test_diag['peak_windows_p95']}")  # Imprime cobertura de eventos y cola alta en test
     print(f"[sequences] Weight thresholds(train): {train_diag['thresholds']}")  # Imprime P95/P99/P99.9 usados por pesos y diagnosticos
 
     return train_loader, val_loader, test_loader  # Devuelve loaders listos para entrenamiento y evaluacion

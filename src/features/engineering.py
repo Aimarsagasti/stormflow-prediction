@@ -1,4 +1,4 @@
-﻿"""Feature engineering utilities for MSD stormflow modeling."""
+"""Feature engineering utilities for MSD stormflow modeling."""
 
 from __future__ import annotations  # Permite anotaciones modernas de tipos con compatibilidad amplia
 
@@ -17,7 +17,7 @@ def _infer_resolution_minutes(timestamps: pd.Series) -> int:
 
 def _add_rain_features(df_feat: pd.DataFrame, resolution_minutes: int) -> pd.DataFrame:
     """Create rainfall rolling and recency features."""
-    rolling_sum_minutes = [10, 15, 30, 60, 120, 360]  # Define ventanas de acumulado pedidas en la propuesta
+    rolling_sum_minutes = [10, 15, 30, 60, 120, 180, 360]  # Define ventanas de acumulado pedidas en la propuesta con un nivel intermedio extra para humedad reciente
     rolling_max_minutes = [10, 30, 60]  # Define ventanas de maximo pedidas para lluvia intensa
 
     for window_minutes in rolling_sum_minutes:  # Recorre cada ventana de acumulado solicitada
@@ -58,9 +58,13 @@ def create_features(df_clean: pd.DataFrame) -> pd.DataFrame:
     df_feat = _add_rain_features(df_feat, resolution_minutes)  # Agrega rolling sums, rolling max y recencia de lluvia
 
     steps_5m = max(int(5 / resolution_minutes), 1)  # Traduce 5 minutos al numero de pasos de la serie
+    steps_10m = max(int(10 / resolution_minutes), 1)  # Traduce 10 minutos al numero de pasos de la serie
     steps_15m = max(int(15 / resolution_minutes), 1)  # Traduce 15 minutos al numero de pasos de la serie
+    steps_30m = max(int(30 / resolution_minutes), 1)  # Traduce 30 minutos al numero de pasos de la serie
     df_feat["delta_flow_5m"] = df_feat["flow_total_mgd"].diff(periods=steps_5m).fillna(0.0)  # Calcula variacion de flow_total en 5 minutos
     df_feat["delta_flow_15m"] = df_feat["flow_total_mgd"].diff(periods=steps_15m).fillna(0.0)  # Calcula variacion de flow_total en 15 minutos
+    df_feat["delta_rain_10m"] = df_feat["rain_in"].diff(periods=steps_10m).fillna(0.0)  # Expone si la lluvia reciente se esta intensificando o debilitando a muy corto plazo
+    df_feat["delta_rain_30m"] = df_feat["rain_in"].diff(periods=steps_30m).fillna(0.0)  # Resume cambio de lluvia en una ventana un poco mas estable para distinguir ascensos sostenidos
 
     hour_fraction = (df_feat["timestamp"].dt.hour + (df_feat["timestamp"].dt.minute / 60.0)) / 24.0  # Convierte hora del dia a fase continua
     df_feat["hour_sin"] = np.sin(2.0 * np.pi * hour_fraction)  # Codifica fase horaria en seno para capturar periodicidad
@@ -78,6 +82,7 @@ def create_features(df_clean: pd.DataFrame) -> pd.DataFrame:
         "rain_sum_30m",  # Acumulado de lluvia en media hora
         "rain_sum_60m",  # Acumulado de lluvia en una hora
         "rain_sum_120m",  # Acumulado de lluvia en dos horas
+        "rain_sum_180m",  # Acumulado de lluvia intermedio para distinguir saturacion reciente sin depender solo de 120 o 360 min
         "rain_sum_360m",  # Acumulado de lluvia en seis horas para memoria de humedad
         "rain_max_10m",  # Maximo de lluvia reciente de 10 minutos
         "rain_max_30m",  # Maximo de lluvia reciente de 30 minutos
@@ -85,6 +90,8 @@ def create_features(df_clean: pd.DataFrame) -> pd.DataFrame:
         "minutes_since_last_rain",  # Recencia de lluvia con cap de 24 horas
         "delta_flow_5m",  # Tendencia corta de flow_total en 5 minutos
         "delta_flow_15m",  # Tendencia corta de flow_total en 15 minutos
+        "delta_rain_10m",  # Cambio inmediato de lluvia para distinguir intensificacion rapida antes del pico
+        "delta_rain_30m",  # Cambio de lluvia un poco mas estable para separar pulsos breves de episodios crecientes
         "hour_sin",  # Componente ciclica senoidal horaria
         "hour_cos",  # Componente ciclica cosenoidal horaria
         "month_sin",  # Componente ciclica senoidal mensual

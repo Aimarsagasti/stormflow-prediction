@@ -1,8 +1,8 @@
-﻿"""Composite loss functions for stormflow peak-focused training."""
+"""Composite loss functions for stormflow peak-focused training."""
 
 from __future__ import annotations  # Permite anotaciones modernas con buena compatibilidad
 
-from typing import Dict, Optional  # Define tipos para parametros de normalizacion y salidas opcionales
+from typing import Dict, Optional, Tuple  # Define tipos para parametros de normalizacion y salidas opcionales
 
 import numpy as np  # Permite convertir umbrales reales a la escala normalizada del entrenamiento
 import torch  # Provee operaciones tensoriales para calculo de perdidas
@@ -13,7 +13,7 @@ from src.pipeline.normalize import normalize_target_values  # Reutiliza la conve
 
 
 class CompositeLoss(nn.Module):
-    """Composite loss: robust regression + event BCE + peak/base penalties."""
+    """Composite loss: gated regression + event BCE + direct magnitude supervision."""
 
     def __init__(
         self,
@@ -21,11 +21,12 @@ class CompositeLoss(nn.Module):
         p99_threshold: float,
         p999_threshold: float,
         base_threshold: float = 0.5,
-        huber_weight: float = 0.30,
+        huber_weight: float = 0.25,
         asym_weight: float = 0.20,
         peak_weight: float = 0.20,
-        event_weight: float = 0.20,
+        event_weight: float = 0.10,
         false_positive_weight: float = 0.10,
+        magnitude_weight: float = 0.15,
         huber_beta: float = 1.0,
         event_pos_weight: float = 1.0,
         norm_params: Optional[Dict[str, object]] = None,
@@ -52,6 +53,7 @@ class CompositeLoss(nn.Module):
         self.peak_weight = float(peak_weight)  # Guarda peso global de la componente Peak MSE
         self.event_weight = float(event_weight)  # Guarda peso global de la supervision de evento
         self.false_positive_weight = float(false_positive_weight)  # Guarda peso global de la penalizacion de falsas alarmas
+        self.magnitude_weight = float(magnitude_weight)  # Guarda peso global de la supervision directa sobre la rama de magnitud
         self.huber_base = nn.SmoothL1Loss(reduction="none", beta=huber_beta)  # Define Huber elemento a elemento para poder ponderar por muestra
         self.register_buffer(  # Registra el peso positivo de BCE como buffer para moverlo junto al modulo
             "event_pos_weight_tensor",  # Define nombre del buffer persistente del modulo
@@ -65,15 +67,30 @@ class CompositeLoss(nn.Module):
             return values[mask].mean()  # Calcula media solo sobre las posiciones activas del subconjunto
         return torch.zeros((), device=values.device, dtype=values.dtype)  # Retorna cero escalar cuando el subconjunto esta vacio
 
-    def _resolve_outputs(self, model_output: torch.Tensor | Dict[str, torch.Tensor]) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
-        """Extract regression prediction and event logit from either tensor or dict output."""
-        if isinstance(model_output, dict):  # Soporta el nuevo modelo multitarea que retorna varias salidas
+    def _resolve_outputs(
+        self,
+        model_output: torch.Tensor | Dict[str, torch.Tensor],
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """Extract regression prediction, event logit, and magnitude prediction from output."""
+        if isinstance(model_output, dict):  # Soporta el modelo multitarea que retorna varias salidas
             if "stormflow_prediction" not in model_output:  # Valida clave requerida para la tarea de regresion principal
                 raise ValueError("model_output dict must include 'stormflow_prediction'")  # Lanza error claro si la salida principal falta
             y_pred = model_output["stormflow_prediction"]  # Recupera la prediccion final ya gateada por evento
             event_logit = model_output.get("event_logit")  # Recupera logit de evento cuando el modelo expone la rama auxiliar
-            return y_pred, event_logit  # Devuelve ambas piezas para calcular la loss compuesta
-        return model_output, None  # Mantiene compatibilidad con modelos antiguos de salida unica
+            magnitude_prediction = model_output.get("magnitude_prediction")  # Recupera la magnitud previa al gating para supervision directa
+            return y_pred, event_logit, magnitude_prediction  # Devuelve todas las piezas utiles para la loss compuesta
+        return model_output, None, None  # Mantiene compatibilidad con modelos antiguos de salida unica
+
+    def _build_effective_event_targets(
+        self,
+        y_true: torch.Tensor,
+        event_targets: torch.Tensor,
+    ) -> torch.Tensor:
+        """Build an event target focused on meaningful future storm response."""
+        magnitude_active_mask = y_true >= self.base_threshold  # Marca muestras donde la magnitud futura ya es materialmente relevante
+        interval_supported_mask = (event_targets >= 0.5) & (y_true >= (self.base_threshold * 0.5))  # Conserva positivos de borde solo si tambien hay respuesta futura no trivial
+        effective_event_mask = magnitude_active_mask | interval_supported_mask  # Combina magnitud real y soporte del intervalo para definir activacion util
+        return effective_event_mask.to(dtype=y_true.dtype)  # Devuelve target auxiliar en float para BCE y mascaras posteriores
 
     def _weighted_huber(self, y_pred: torch.Tensor, y_true: torch.Tensor, sample_weights: torch.Tensor) -> torch.Tensor:
         huber_per_sample = self.huber_base(y_pred, y_true)  # Calcula error Huber por muestra y dimension
@@ -85,18 +102,18 @@ class CompositeLoss(nn.Module):
         y_pred: torch.Tensor,
         y_true: torch.Tensor,
         sample_weights: torch.Tensor,
-        event_targets: torch.Tensor,
+        effective_event_targets: torch.Tensor,
     ) -> torch.Tensor:
         under_error = torch.relu(y_true - y_pred)  # Conserva solo infraestimaciones y anula sobreestimaciones
         asym_factor = torch.full_like(y_true, 2.0)  # Usa 2x como factor base para muestras por debajo de P99
-        asym_factor = torch.where(sample_weights >= 12.0, torch.full_like(y_true, 4.0), asym_factor)  # Escala a 4x cuando la muestra pertenece a la cola >= P99
-        asym_factor = torch.where(sample_weights >= 20.0, torch.full_like(y_true, 6.0), asym_factor)  # Escala a 6x cuando la muestra pertenece a la cola >= P99.9
-        focus_mask = (event_targets >= 0.5) | (sample_weights >= 6.0)  # Enfoca la penalizacion donde importa mas el timing/magnitud de evento
-        asym_values = (under_error ** 2) * asym_factor * sample_weights  # Integra severidad y peso de magnitud en la penalizacion de infraestimacion
-        return self._masked_mean(asym_values, focus_mask)  # Promedia solo sobre muestras de evento o cola alta para evitar ruido en baseflow
+        asym_factor = torch.where(y_true >= self.p99_threshold, torch.full_like(y_true, 4.0), asym_factor)  # Escala a 4x cuando el target pertenece a la cola >= P99
+        asym_factor = torch.where(y_true >= self.p999_threshold, torch.full_like(y_true, 6.0), asym_factor)  # Escala a 6x cuando el target pertenece a la cola >= P99.9
+        focus_mask = (effective_event_targets >= 0.5) | (y_true >= self.p95_threshold)  # Enfoca la penalizacion donde importa mas el timing y la magnitud de evento
+        asym_values = (under_error ** 2) * asym_factor * sample_weights  # Integra severidad real y peso de magnitud en la penalizacion de infraestimacion
+        return self._masked_mean(asym_values, focus_mask)  # Promedia solo sobre muestras de evento relevante o cola alta para evitar ruido en baseflow
 
     def _peak_mse(self, y_pred: torch.Tensor, y_true: torch.Tensor, sample_weights: torch.Tensor) -> torch.Tensor:
-        peak_mask = sample_weights >= 6.0  # Usa el peso de muestra como criterio robusto para detectar ventanas >= P95
+        peak_mask = y_true >= self.p95_threshold  # Usa el target real como criterio robusto para detectar muestras de pico
         peak_error = (y_pred - y_true) ** 2  # Calcula error cuadratico por muestra para usarlo en el subconjunto de picos
         peak_values = peak_error * sample_weights  # Repondera el error cuadratico segun severidad del target futuro
         return self._masked_mean(peak_values, peak_mask)  # Calcula MSE ponderado solo sobre muestras de pico relevantes
@@ -105,23 +122,37 @@ class CompositeLoss(nn.Module):
         self,
         y_pred: torch.Tensor,
         y_true: torch.Tensor,
-        event_targets: torch.Tensor,
+        effective_event_targets: torch.Tensor,
     ) -> torch.Tensor:
-        base_mask = (event_targets < 0.5) & (y_true <= self.base_threshold)  # Selecciona no-eventos o casi-cero donde las falsas alarmas son el fallo dominante
+        base_mask = (effective_event_targets < 0.5) & (y_true <= self.base_threshold)  # Selecciona no-eventos o casi-cero donde las falsas alarmas son el fallo dominante
         over_error = torch.relu(y_pred - y_true)  # Conserva solo sobreestimaciones para castigar falsas activaciones en baseflow
         penalty_values = over_error ** 2  # Usa penalizacion cuadratica para que errores grandes cerca de cero cuesten mucho mas
         return self._masked_mean(penalty_values, base_mask)  # Promedia solo sobre el subconjunto base/no-evento relevante
 
-    def _event_bce(self, event_logit: Optional[torch.Tensor], event_targets: torch.Tensor) -> torch.Tensor:
+    def _event_bce(self, event_logit: Optional[torch.Tensor], effective_event_targets: torch.Tensor) -> torch.Tensor:
         if event_logit is None:  # Mantiene compatibilidad con modelos antiguos que no exponen logit de evento
-            return torch.zeros((), device=event_targets.device, dtype=event_targets.dtype)  # Retorna cero para no afectar la loss total
+            return torch.zeros((), device=effective_event_targets.device, dtype=effective_event_targets.dtype)  # Retorna cero para no afectar la loss total
         bce_per_sample = F.binary_cross_entropy_with_logits(  # Calcula BCE estable numercamente para la rama de evento
             event_logit,  # Usa logit crudo en vez de probabilidad para mejor estabilidad numerica
-            event_targets,  # Usa etiqueta booleana de evento alineada al horizonte objetivo
-            pos_weight=self.event_pos_weight_tensor.to(event_logit.device),  # Compensa el desbalance natural entre eventos y no-eventos
+            effective_event_targets,  # Usa etiqueta de evento efectivo alineada con la necesidad operativa real
+            pos_weight=self.event_pos_weight_tensor.to(event_logit.device),  # Compensa el desbalance natural entre positivos y negativos
             reduction="none",  # Mantiene perdida por muestra para poder promediar explicitamente
         )
         return bce_per_sample.mean()  # Promedia sobre batch para obtener escalar estable de supervision auxiliar
+
+    def _magnitude_supervision(
+        self,
+        magnitude_prediction: Optional[torch.Tensor],
+        y_true: torch.Tensor,
+        sample_weights: torch.Tensor,
+        effective_event_targets: torch.Tensor,
+    ) -> torch.Tensor:
+        if magnitude_prediction is None:  # Mantiene compatibilidad con modelos que no exponen la rama de magnitud por separado
+            return torch.zeros((), device=y_true.device, dtype=y_true.dtype)  # Retorna cero para no alterar la loss total
+        magnitude_mask = (effective_event_targets >= 0.5) | (y_true >= self.p95_threshold)  # Supervisa magnitud donde realmente importa aprender amplitud del evento
+        magnitude_error = self.huber_base(magnitude_prediction, y_true)  # Calcula error robusto directo sobre la salida de magnitud antes del gate
+        magnitude_values = magnitude_error * sample_weights  # Repondera la supervision directa segun severidad de la muestra
+        return self._masked_mean(magnitude_values, magnitude_mask)  # Promedia solo sobre eventos relevantes y cola alta
 
     def forward(
         self,
@@ -130,37 +161,49 @@ class CompositeLoss(nn.Module):
         sample_weights: torch.Tensor,
         event_targets: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        y_pred, event_logit = self._resolve_outputs(model_output=model_output)  # Extrae prediccion continua y logit de evento desde la salida del modelo
+        y_pred, event_logit, magnitude_prediction = self._resolve_outputs(model_output=model_output)  # Extrae prediccion continua, logit auxiliar y magnitud previa al gating
         if y_pred.shape != y_true.shape:  # Valida que prediccion y target tengan misma forma (batch, 1)
             raise ValueError("y_pred and y_true must have the same shape")  # Mensaje claro para detectar errores de modelo/dataloader
         if sample_weights.shape != y_true.shape:  # Valida que pesos por muestra coincidan con forma del target
             raise ValueError("sample_weights must have the same shape as y_true")  # Mensaje claro para detectar errores de batching
 
         if event_targets is None:  # Ofrece fallback razonable si el llamador aun no pasa la rama auxiliar explicitamente
-            event_targets = (y_true > self.base_threshold).to(dtype=y_true.dtype)  # Aproxima evento a partir del target cuando no existe supervision explicita
+            event_targets = torch.zeros_like(y_true)  # Usa un tensor nulo y deja que la magnitud futura defina el evento efectivo
         if event_targets.shape != y_true.shape:  # Valida que la supervision de evento tenga la misma estructura que el target continuo
             raise ValueError("event_targets must have the same shape as y_true")  # Lanza error claro si el DataLoader esta desalineado
+
+        effective_event_targets = self._build_effective_event_targets(  # Construye una etiqueta de evento mas cercana a la necesidad operativa real
+            y_true=y_true,  # Usa target futuro para distinguir respuesta material de cola casi nula
+            event_targets=event_targets,  # Usa el intervalo original solo como apoyo para casos de borde
+        )
 
         huber_component = self._weighted_huber(y_pred=y_pred, y_true=y_true, sample_weights=sample_weights)  # Calcula componente 1 de regresion robusta ponderada
         asym_component = self._asymmetric_underprediction(  # Calcula componente 2 enfocada en infraestimaciones de eventos y colas altas
             y_pred=y_pred,  # Pasa prediccion final gateada del modelo
             y_true=y_true,  # Pasa target continuo alineado al horizonte
             sample_weights=sample_weights,  # Pasa pesos por severidad para reforzar extremos
-            event_targets=event_targets,  # Pasa etiqueta de evento para enfocar la penalizacion donde importa operativamente
+            effective_event_targets=effective_event_targets,  # Pasa etiqueta efectiva para enfocar la penalizacion donde importa operativamente
         )
         peak_component = self._peak_mse(y_pred=y_pred, y_true=y_true, sample_weights=sample_weights)  # Calcula componente 3 MSE enfocado en muestras >= P95
-        event_component = self._event_bce(event_logit=event_logit, event_targets=event_targets)  # Calcula componente 4 BCE para activar/desactivar eventos correctamente
+        event_component = self._event_bce(event_logit=event_logit, effective_event_targets=effective_event_targets)  # Calcula componente 4 BCE para activar/desactivar eventos relevantes correctamente
         false_positive_component = self._false_positive_penalty(  # Calcula componente 5 para castigar falsas alarmas cerca de cero
             y_pred=y_pred,  # Usa la prediccion final ya gateada del modelo
             y_true=y_true,  # Usa target continuo real para medir sobreestimacion
-            event_targets=event_targets,  # Usa bandera de evento para limitar la penalizacion a base/no-evento
+            effective_event_targets=effective_event_targets,  # Usa bandera efectiva para limitar la penalizacion a base/no-evento real
+        )
+        magnitude_component = self._magnitude_supervision(  # Calcula componente 6 para supervisar la magnitud antes de que el gate la comprima
+            magnitude_prediction=magnitude_prediction,  # Usa salida de magnitud previa al gating cuando el modelo la expone
+            y_true=y_true,  # Usa target continuo alineado al horizonte
+            sample_weights=sample_weights,  # Reutiliza pesos de severidad ya definidos por el pipeline
+            effective_event_targets=effective_event_targets,  # Supervisa con foco en eventos materialmente relevantes
         )
 
         total_loss = (  # Combina componentes segun pesos definidos para equilibrar baseflow, evento y extremos
             self.huber_weight * huber_component  # Mantiene una base robusta para toda la distribucion del target
             + self.asym_weight * asym_component  # Refuerza que infraestimar eventos severos cueste mas que sobreestimar
             + self.peak_weight * peak_component  # Mantiene foco adicional en la cola alta del stormflow
-            + self.event_weight * event_component  # Supervisa explicitamente la activacion correcta de eventos futuros
+            + self.event_weight * event_component  # Supervisa explicitamente la activacion correcta de eventos futuros relevantes
             + self.false_positive_weight * false_positive_component  # Castiga el patron observado de falsas alarmas cerca de cero
+            + self.magnitude_weight * magnitude_component  # Ensena amplitud directamente a la rama de magnitud para evitar compresion excesiva
         )
         return total_loss  # Devuelve escalar final de perdida para backpropagation

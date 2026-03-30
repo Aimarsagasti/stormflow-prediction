@@ -1,4 +1,4 @@
-﻿"""Training utilities for stormflow models with early stopping and diagnostics."""
+"""Training utilities for stormflow models with early stopping and diagnostics."""
 
 from __future__ import annotations  # Permite anotaciones modernas de tipos sin problemas de version
 
@@ -60,18 +60,19 @@ def train_model(
     criterion: nn.Module,
     config: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Train model with AdamW, ReduceLROnPlateau, grad clipping, and stricter early stopping."""
+    """Train model with AdamW, ReduceLROnPlateau, grad clipping, and safer early stopping."""
     device = _resolve_device(config)  # Determina dispositivo de entrenamiento segun config o disponibilidad
     model = model.to(device)  # Mueve modelo al dispositivo objetivo para computo consistente
 
     learning_rate = float(config.get("learning_rate", 1e-3))  # Usa LR recomendado si no viene override
     weight_decay = float(config.get("weight_decay", 1e-4))  # Usa weight decay recomendado si no viene override
     max_epochs = int(config.get("max_epochs", 80))  # Limita epocas segun propuesta para evitar sobreentrenamiento
+    min_epochs = min(int(config.get("min_epochs", 20)), max_epochs)  # Fuerza una fase minima de aprendizaje antes de permitir early stopping
     grad_clip_max_norm = float(config.get("grad_clip_max_norm", 1.0))  # Define clipping de gradiente recomendado
-    early_stopping_patience = int(config.get("early_stopping_patience", 5))  # Define paciencia de early stopping mas estricta por el overfitting observado
-    early_stopping_min_delta = float(config.get("early_stopping_min_delta", 1e-4))  # Exige una mejora minima real para no seguir entrenando por ruido
+    early_stopping_patience = int(config.get("early_stopping_patience", 8))  # Aumenta paciencia para no cortar demasiado pronto una validacion ruidosa
+    early_stopping_min_delta = float(config.get("early_stopping_min_delta", 5e-5))  # Reduce min_delta para aceptar mejoras pequenas pero reales en tareas raras
     scheduler_factor = float(config.get("scheduler_factor", 0.5))  # Define cuanto se reduce el LR al estancarse la validacion
-    scheduler_patience = int(config.get("scheduler_patience", 2))  # Reduce LR antes para reaccionar mas rapido al plateau de validacion
+    scheduler_patience = int(config.get("scheduler_patience", 3))  # Da un poco mas de margen antes de bajar LR en validacion ruidosa
 
     optimizer = AdamW(  # Inicializa optimizer AdamW con hiperparametros de propuesta
         model.parameters(),  # Optimiza todos los parametros entrenables del modelo
@@ -82,7 +83,7 @@ def train_model(
         optimizer=optimizer,  # Conecta scheduler al optimizer de entrenamiento
         mode="min",  # Minimiza metrica de validacion (val_loss)
         factor=scheduler_factor,  # Reduce LR segun factor configurable cuando no mejora
-        patience=scheduler_patience,  # Espera pocas epocas sin mejora antes de reducir LR
+        patience=scheduler_patience,  # Espera algunas epocas sin mejora antes de reducir LR
     )
 
     history: Dict[str, Any] = {  # Prepara contenedor de historia para monitoreo y analisis posterior
@@ -99,7 +100,8 @@ def train_model(
     if train_diag:  # Imprime diagnostico de desbalance antes de entrenar para trazabilidad en Colab
         print(  # Resume la tasa de evento natural y el peso BCE sugerido por el loader de train
             f"[train] Event rate(train)={train_diag.get('event_rate', float('nan')):.4f} | "
-            f"event_pos_weight={train_diag.get('event_pos_weight', float('nan')):.4f}"
+            f"event_pos_weight={train_diag.get('event_pos_weight', float('nan')):.4f} | "
+            f"min_epochs={min_epochs}"
         )
 
     for epoch_idx in range(max_epochs):  # Recorre ciclo principal de entrenamiento por epocas
@@ -157,14 +159,19 @@ def train_model(
             f"lr={current_lr:.6e}{star_marker}"
         )
 
-        if epochs_without_improvement >= early_stopping_patience:  # Verifica condicion de parada temprana por paciencia agotada
+        if (epoch_idx + 1) < min_epochs:  # Impide parar antes de completar una fase minima de aprendizaje util
+            continue  # Salta la evaluacion de early stopping hasta cumplir el minimo de epocas
+
+        if epochs_without_improvement >= early_stopping_patience:  # Verifica condicion de parada temprana por paciencia agotada tras min_epochs
             print(f"[train] Early stopping activado en epoch {epoch_idx + 1}")  # Informa activacion de early stopping en consola
             break  # Detiene entrenamiento para evitar sobreajuste y ahorrar tiempo de computo
 
     model.load_state_dict(best_state_dict)  # Restaura mejores pesos encontrados durante entrenamiento
+    history["epochs_trained"] = len(history["train_loss"])  # Registra cuantas epocas se ejecutaron realmente para auditoria posterior
     print(  # Resume resultado final tras restaurar el mejor estado
         f"[train] Mejor epoch: {history['best_epoch']} | "
-        f"best_val_loss={history['best_val_loss']:.6f}"
+        f"best_val_loss={history['best_val_loss']:.6f} | "
+        f"epochs_trained={history['epochs_trained']}"
     )
 
     return history  # Devuelve historia completa para graficar curvas y auditar entrenamiento
