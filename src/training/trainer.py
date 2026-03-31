@@ -27,30 +27,19 @@ def _unpack_batch(
     device: torch.device,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Move a batch to device and normalize the tuple shape."""
-    if len(batch) == 4:  # Soporta el nuevo dataset multitarea que incluye etiqueta de evento
+    if len(batch) == 4:  # Soporta dataset que incluye etiqueta auxiliar de evento para metadata
         x_batch, y_batch, w_batch, event_batch = batch  # Desempaqueta la cuadrupla completa del DataLoader
-    elif len(batch) == 3:  # Mantiene compatibilidad con datasets antiguos sin etiqueta de evento explicita
+    elif len(batch) == 3:  # Mantiene compatibilidad con datasets sin etiqueta auxiliar explicita
         x_batch, y_batch, w_batch = batch  # Desempaqueta tripleta clasica (X, y, w)
-        event_batch = (y_batch > 0).to(dtype=y_batch.dtype)  # Construye una aproximacion minima de evento para no romper la loss nueva
+        event_batch = (y_batch > 0).to(dtype=y_batch.dtype)  # Construye mascara minima para conservar metadata consistente
     else:  # Detecta formatos inesperados antes de entrenar con un batch mal formado
         raise ValueError("Expected batches with 3 or 4 tensors")  # Lanza error claro para depurar DataLoaders inconsistentes
 
     x_batch = x_batch.to(device)  # Mueve features de batch al dispositivo de entrenamiento
     y_batch = y_batch.to(device)  # Mueve target del batch al dispositivo de entrenamiento
     w_batch = w_batch.to(device)  # Mueve pesos por muestra al dispositivo de entrenamiento
-    event_batch = event_batch.to(device)  # Mueve etiqueta de evento al dispositivo de entrenamiento
-    return x_batch, y_batch, w_batch, event_batch  # Devuelve batch homogenizado y listo para el modelo/loss
-
-
-def _extract_prediction_tensor(model_output: Any) -> torch.Tensor:
-    """Extract the stormflow prediction tensor from model output."""
-    if isinstance(model_output, dict):  # Soporta la nueva salida multitarea del modelo
-        if "stormflow_prediction" not in model_output:  # Valida presencia de la salida continua principal
-            raise ValueError("Model output dict must include 'stormflow_prediction'")  # Da mensaje claro si la firma de salida cambio
-        return model_output["stormflow_prediction"]  # Devuelve la prediccion continua usada en perdida y metricas
-    if isinstance(model_output, torch.Tensor):  # Mantiene compatibilidad con modelos antiguos de salida unica
-        return model_output  # Devuelve tensor directo si el modelo no retorna un diccionario
-    raise TypeError("Unsupported model output type")  # Falla de forma explicita ante tipos inesperados
+    event_batch = event_batch.to(device)  # Mueve etiqueta auxiliar al dispositivo para metadata opcional
+    return x_batch, y_batch, w_batch, event_batch  # Devuelve batch homogenizado y listo para el modelo y metricas
 
 
 def train_model(
@@ -110,11 +99,13 @@ def train_model(
         train_batches = 0  # Cuenta batches procesados para calcular media correctamente
 
         for batch in train_loader:  # Itera DataLoader de train con tensores del pipeline multitarea
-            x_batch, y_batch, w_batch, event_batch = _unpack_batch(batch=batch, device=device)  # Mueve batch al dispositivo y normaliza su forma
+            x_batch, y_batch, w_batch, _event_batch = _unpack_batch(batch=batch, device=device)  # Mueve batch al dispositivo y normaliza su forma
 
             optimizer.zero_grad(set_to_none=True)  # Limpia gradientes previos de forma eficiente en memoria
-            model_output = model(x_batch)  # Ejecuta forward del modelo para obtener salidas multitarea del batch
-            loss = criterion(model_output, y_batch, w_batch, event_batch)  # Calcula loss compuesta usando prediccion, target, pesos y evento
+            y_pred = model(x_batch)  # Ejecuta forward del modelo para obtener prediccion continua del batch
+            if not isinstance(y_pred, torch.Tensor):  # Verifica la nueva firma esperada del modelo para evitar errores silenciosos
+                raise TypeError("Model output must be a torch.Tensor")  # Lanza error claro si algun modelo devuelve una estructura no soportada
+            loss = criterion(y_pred, y_batch, w_batch)  # Calcula loss compuesta usando solo prediccion, target y pesos
             loss.backward()  # Ejecuta backpropagation para calcular gradientes
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip_max_norm)  # Aplica clipping para estabilizar entrenamiento
             optimizer.step()  # Actualiza parametros del modelo con el optimizer
@@ -129,9 +120,11 @@ def train_model(
         val_batches = 0  # Cuenta batches de validacion para media robusta
         with torch.no_grad():  # Desactiva gradientes para reducir memoria y acelerar validacion
             for batch in val_loader:  # Itera DataLoader de validacion con la misma estructura de tensores
-                x_batch, y_batch, w_batch, event_batch = _unpack_batch(batch=batch, device=device)  # Mueve batch a dispositivo y normaliza la firma
-                model_output = model(x_batch)  # Ejecuta forward en validacion sin actualizar pesos
-                loss = criterion(model_output, y_batch, w_batch, event_batch)  # Calcula perdida de validacion con la misma funcion objetivo
+                x_batch, y_batch, w_batch, _event_batch = _unpack_batch(batch=batch, device=device)  # Mueve batch a dispositivo y normaliza la firma
+                y_pred = model(x_batch)  # Ejecuta forward en validacion sin actualizar pesos
+                if not isinstance(y_pred, torch.Tensor):  # Verifica firma de salida tambien en validacion para detectar inconsistencias pronto
+                    raise TypeError("Model output must be a torch.Tensor")  # Lanza error claro si la firma de salida es incorrecta
+                loss = criterion(y_pred, y_batch, w_batch)  # Calcula perdida de validacion con la misma funcion objetivo
                 val_loss_sum += float(loss.detach().item())  # Acumula perdida batch para promedio de epoca
                 val_batches += 1  # Incrementa contador de batches de validacion
 
@@ -196,19 +189,16 @@ def predict(
     with torch.no_grad():  # Desactiva gradientes para inferencia eficiente y menor uso de memoria
         for batch in data_loader:  # Consume loader con la estructura multitarea definida por el pipeline
             x_batch, y_batch, _w_batch, event_batch = _unpack_batch(batch=batch, device=resolved_device)  # Reutiliza la logica comun para mover tensores al dispositivo
-            model_output = model(x_batch)  # Ejecuta forward del modelo para obtener predicciones del batch
-            y_pred = _extract_prediction_tensor(model_output)  # Extrae la prediccion continua principal desde la salida del modelo
+            y_pred = model(x_batch)  # Ejecuta forward del modelo para obtener predicciones del batch
+            if not isinstance(y_pred, torch.Tensor):  # Verifica firma esperada de salida para inferencia robusta
+                raise TypeError("Model output must be a torch.Tensor")  # Lanza error claro si algun modelo devuelve una estructura no soportada
 
             predictions.append(y_pred.detach().cpu().numpy().reshape(-1))  # Convierte prediccion a numpy 1D y acumula
             targets.append(y_batch.detach().cpu().numpy().reshape(-1))  # Convierte target a numpy 1D y acumula
 
             if return_metadata:  # Solo acumula metadata adicional cuando el llamador la necesita explicitamente
                 event_targets.append(event_batch.detach().cpu().numpy().reshape(-1))  # Guarda etiqueta real de evento alineada con cada target
-                if isinstance(model_output, dict) and "event_probability" in model_output:  # Verifica si el modelo expone probabilidad de evento para diagnostico
-                    event_prob = model_output["event_probability"]  # Recupera la probabilidad de evento predicha por la rama auxiliar
-                else:  # Mantiene compatibilidad con modelos que no devuelven probabilidad de evento explicita
-                    event_prob = torch.zeros_like(y_pred)  # Usa ceros para conservar la forma esperada de metadata
-                event_probabilities.append(event_prob.detach().cpu().numpy().reshape(-1))  # Guarda probabilidad predicha de evento por muestra
+                event_probabilities.append(np.zeros_like(y_pred.detach().cpu().numpy().reshape(-1), dtype=np.float32))  # Mantiene compatibilidad devolviendo probabilidad nula al no existir cabeza de evento
 
     if predictions:  # Verifica que haya al menos un batch antes de concatenar
         y_pred_array = np.concatenate(predictions, axis=0)  # Concatena todas las predicciones en un vector continuo
@@ -222,6 +212,6 @@ def predict(
 
     metadata: Dict[str, np.ndarray] = {  # Prepara contenedor estructurado para metadata alineada muestra a muestra
         "event_targets": np.concatenate(event_targets, axis=0) if event_targets else np.empty((0,), dtype=np.float32),  # Devuelve mascara real de evento si existia en el loader
-        "event_probabilities": np.concatenate(event_probabilities, axis=0) if event_probabilities else np.empty((0,), dtype=np.float32),  # Devuelve probabilidad predicha de evento por muestra
+        "event_probabilities": np.concatenate(event_probabilities, axis=0) if event_probabilities else np.empty((0,), dtype=np.float32),  # Devuelve vector nulo para mantener compatibilidad con consumidores existentes
     }
     return y_pred_array, y_real_array, metadata  # Devuelve predicciones, targets y metadata auxiliar para evaluacion avanzada

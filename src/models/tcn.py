@@ -2,11 +2,10 @@
 
 from __future__ import annotations  # Permite anotaciones modernas de tipos sin problemas de version
 
-from typing import Dict, List, Sequence  # Define tipos para listas de canales, retornos y dilataciones
+from typing import List, Sequence  # Define tipos para listas de canales y dilataciones
 
 import torch  # Provee tensores y operaciones base para el modelo
 from torch import nn  # Incluye modulos de red neuronal en PyTorch
-from torch.nn import functional as F  # Aporta operaciones funcionales para activaciones y gating
 
 
 class CausalConv1d(nn.Module):
@@ -37,24 +36,6 @@ def _build_group_norm(num_channels: int) -> nn.GroupNorm:
         if num_channels % num_groups == 0:  # Verifica divisibilidad exacta requerida por GroupNorm
             return nn.GroupNorm(num_groups=num_groups, num_channels=num_channels)  # Devuelve normalizacion estable para el ancho actual
     return nn.GroupNorm(num_groups=1, num_channels=num_channels)  # Fallback seguro equivalente a LayerNorm por canal
-
-
-class TemporalAttentionPooling(nn.Module):
-    """Attention pooling that lets the model focus on the most relevant timesteps."""
-
-    def __init__(self, in_channels: int, hidden_channels: int) -> None:
-        super().__init__()  # Inicializa el modulo de pooling con atencion aprendible
-        self.score_network = nn.Sequential(  # Define una red liviana para puntuar cada timestep de la representacion temporal
-            nn.Conv1d(in_channels, hidden_channels, kernel_size=1),  # Mezcla canales sin alterar la longitud temporal
-            nn.ReLU(),  # Introduce no linealidad para distinguir patrones temporales utiles
-            nn.Conv1d(hidden_channels, 1, kernel_size=1),  # Proyecta cada timestep a un score escalar de importancia
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        attention_scores = self.score_network(x)  # Calcula un score de relevancia para cada timestep
-        attention_weights = torch.softmax(attention_scores, dim=-1)  # Convierte scores en pesos positivos que suman 1 en el tiempo
-        pooled_context = torch.sum(x * attention_weights, dim=-1)  # Calcula contexto ponderado resaltando los segmentos mas informativos
-        return pooled_context  # Devuelve embedding temporal agregado con foco adaptativo
 
 
 class TCNResidualBlock(nn.Module):
@@ -115,7 +96,7 @@ class TCNResidualBlock(nn.Module):
 
 
 class StormflowTCN(nn.Module):
-    """Residual TCN with multitask heads for event gating and stormflow magnitude."""
+    """Residual TCN with direct scalar regression head for stormflow prediction."""
 
     def __init__(
         self,
@@ -124,15 +105,13 @@ class StormflowTCN(nn.Module):
         dilations: Sequence[int] | None = None,
         kernel_size: int = 3,
         dropout: float = 0.2,
-        gate_temperature: float = 1.5,
     ) -> None:
         super().__init__()  # Inicializa la clase base para registrar submodulos correctamente
         self.n_features = n_features  # Guarda numero de features de entrada para referencia y depuracion
         self.num_channels = list(num_channels) if num_channels is not None else [32, 64, 64, 64, 32]  # Define canales por bloque segun propuesta
         self.dilations = list(dilations) if dilations is not None else [1, 2, 4, 8, 16]  # Define dilataciones por bloque segun propuesta
         self.kernel_size = kernel_size  # Guarda kernel temporal para metodos de campo receptivo
-        self.dropout = dropout  # Guarda dropout global para bloques y cabezas
-        self.gate_temperature = max(float(gate_temperature), 1e-3)  # Guarda temperatura positiva para suavizar la conversion logit->probabilidad
+        self.dropout = dropout  # Guarda dropout global para bloques y cabeza de regresion
 
         if len(self.num_channels) != len(self.dilations):  # Verifica consistencia entre numero de bloques y dilataciones
             raise ValueError("num_channels and dilations must have the same length")  # Lanza error claro si hay configuracion inconsistente
@@ -158,23 +137,17 @@ class StormflowTCN(nn.Module):
         self.tcn_blocks = nn.Sequential(*blocks)  # Empaqueta bloques en una secuencia ejecutable
 
         final_channels = self.num_channels[-1]  # Obtiene canales finales tras el ultimo bloque TCN
-        attention_hidden = max(final_channels // 2, 8)  # Define ancho intermedio de la red de atencion sin hacerla demasiado costosa
-        self.attention_pool = TemporalAttentionPooling(  # Define pooling temporal aprendible para rescatar patrones previos utiles
-            in_channels=final_channels,  # Usa el ancho final del backbone temporal como entrada de atencion
-            hidden_channels=attention_hidden,  # Usa un ancho moderado para puntuar timesteps sin sobreparametrizar
+        self.regression_head = nn.Sequential(  # Define MLP final para mapear estado causal a prediccion escalar
+            nn.Linear(final_channels, 128),  # Proyecta estado final a un espacio intermedio con mayor capacidad
+            nn.ReLU(),  # Introduce no linealidad para aprender relaciones hidrologicas complejas
+            nn.Dropout(self.dropout),  # Regulariza activaciones intermedias para reducir sobreajuste
+            nn.Linear(128, 64),  # Reduce dimensionalidad para estabilizar la etapa final de regresion
+            nn.ReLU(),  # Introduce una segunda no linealidad antes de la salida
+            nn.Dropout(self.dropout),  # Aplica regularizacion adicional antes de la capa final
+            nn.Linear(64, 1),  # Produce una sola prediccion continua de stormflow en el horizonte
         )
-        self.shared_head = nn.Sequential(  # Define cabeza compartida antes de separar evento y magnitud
-            nn.Linear(final_channels * 2, 128),  # Fusiona ultimo estado causal y contexto con atencion en una representacion comun
-            nn.ReLU(),  # Introduce no linealidad para separar patrones hidrologicos relevantes
-            nn.Dropout(self.dropout),  # Regulariza la representacion compartida para reducir sobreajuste
-            nn.Linear(128, 64),  # Compacta la representacion a un embedding comun mas estable
-            nn.ReLU(),  # Introduce una segunda no linealidad antes de las cabezas finales
-            nn.Dropout(self.dropout),  # Aplica regularizacion adicional justo antes de las salidas multitarea
-        )
-        self.event_head = nn.Linear(64, 1)  # Produce el logit de presencia de evento futuro
-        self.magnitude_head = nn.Linear(64, 1)  # Produce una magnitud potencial no negativa antes del gating
 
-    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         if x.ndim != 3:  # Valida forma esperada (batch, seq_length, n_features)
             raise ValueError("Input tensor must have shape (batch, seq_length, n_features)")  # Mensaje claro para depurar entradas mal formadas
 
@@ -183,22 +156,8 @@ class StormflowTCN(nn.Module):
         x = self.tcn_blocks(x)  # Procesa secuencia con bloques residuales causales multiescala
 
         last_state = x[:, :, -1]  # Conserva el ultimo timestep causal como resumen del estado mas reciente
-        attention_context = self.attention_pool(x)  # Resume la historia con foco adaptativo en los pasos mas relevantes
-        shared_features = torch.cat([last_state, attention_context], dim=1)  # Fusiona estado reciente y contexto temporal seleccionado
-        shared_features = self.shared_head(shared_features)  # Convierte la fusion en un embedding comun para ambas tareas
-
-        event_logit = self.event_head(shared_features)  # Calcula evidencia escalar de si habra evento en el horizonte objetivo
-        magnitude_raw = self.magnitude_head(shared_features)  # Calcula magnitud potencial antes de imponer no negatividad
-        magnitude_prediction = F.softplus(magnitude_raw)  # Garantiza una magnitud no negativa y suave para la rama de regresion
-        event_probability = torch.sigmoid(event_logit / self.gate_temperature)  # Suaviza el gate para reducir compresion excesiva de picos con incertidumbre intermedia
-        stormflow_prediction = magnitude_prediction * event_probability  # Suprime falsas alarmas cuando la probabilidad de evento es baja
-
-        return {  # Devuelve todas las salidas utiles para perdida, inferencia y diagnostico
-            "stormflow_prediction": stormflow_prediction,  # Salida final gateada que se compara contra el target continuo
-            "event_logit": event_logit,  # Logit crudo para BCE con logits y mejor estabilidad numerica
-            "event_probability": event_probability,  # Probabilidad explicita de evento para analisis y gating
-            "magnitude_prediction": magnitude_prediction,  # Magnitud potencial aprendida antes de aplicar el gate de evento
-        }
+        stormflow_prediction = self.regression_head(last_state)  # Genera prediccion escalar directa sin cabeza de evento ni gating
+        return stormflow_prediction  # Devuelve tensor (batch, 1) para entrenamiento de regresion directa
 
     def compute_receptive_field(self, print_result: bool = True) -> int:
         receptive_field = 1  # Inicializa campo receptivo en 1 para el timestep actual
