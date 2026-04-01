@@ -24,6 +24,7 @@ class CompositeLoss(nn.Module):
         asym_weight: float = 0.20,
         peak_weight: float = 0.20,
         base_over_weight: float = 0.12,
+        tail_focus_weight: float = 2.0,
         huber_beta: float = 1.0,
         norm_params: Optional[Dict[str, object]] = None,
         thresholds_are_normalized: bool = False,
@@ -48,6 +49,7 @@ class CompositeLoss(nn.Module):
         self.asym_weight = float(asym_weight)  # Guarda peso global de la penalizacion de infraestimacion
         self.peak_weight = float(peak_weight)  # Guarda peso global de la componente Peak MSE
         self.base_over_weight = float(base_over_weight)  # Guarda peso de la penalizacion explicita de sobreestimacion en baseflow
+        self.tail_focus_weight = float(tail_focus_weight)  # Guarda cuanto se amplifica de forma continua la cola alta dentro del termino peak
         self.huber_base = nn.SmoothL1Loss(reduction="none", beta=huber_beta)  # Define Huber elemento a elemento para poder ponderar por muestra
 
     @staticmethod
@@ -74,7 +76,10 @@ class CompositeLoss(nn.Module):
     def _peak_mse(self, y_pred: torch.Tensor, y_true: torch.Tensor, sample_weights: torch.Tensor) -> torch.Tensor:
         peak_mask = y_true >= self.p95_threshold  # Selecciona picos usando directamente el target real y no los pesos
         squared_error = (y_pred - y_true) ** 2  # Calcula error cuadratico por muestra para enfatizar desviaciones grandes
-        peak_values = squared_error * sample_weights  # Pondera el error cuadratico para mantener prioridad operacional en cola alta
+        tail_range = max(self.p999_threshold - self.p95_threshold, 1e-6)  # Define un rango minimo estable para medir posicion relativa dentro de la cola alta
+        tail_position = torch.clamp((y_true - self.p95_threshold) / tail_range, min=0.0, max=1.0)  # Estima que tan cerca esta cada muestra del extremo superior de la cola
+        tail_factor = 1.0 + (self.tail_focus_weight * tail_position)  # Amplifica de forma continua la perdida cuanto mas extrema es la muestra real
+        peak_values = squared_error * sample_weights * tail_factor  # Aumenta gradiente en la cola alta sin tocar muestras de baseflow
         return self._masked_mean(peak_values, peak_mask)  # Calcula media solo en muestras de pico relevantes
 
     def _base_overprediction_penalty(self, y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
@@ -93,7 +98,7 @@ class CompositeLoss(nn.Module):
 
         huber_component = self._weighted_huber(y_pred=y_pred, y_true=y_true, sample_weights=sample_weights)  # Calcula componente base robusta ponderada
         asym_component = self._asymmetric_underprediction(y_pred=y_pred, y_true=y_true, sample_weights=sample_weights)  # Calcula penalizacion asimetrica de infraestimacion en cola alta
-        peak_component = self._peak_mse(y_pred=y_pred, y_true=y_true, sample_weights=sample_weights)  # Calcula Peak MSE ponderado solo sobre >= P95
+        peak_component = self._peak_mse(y_pred=y_pred, y_true=y_true, sample_weights=sample_weights)  # Calcula Peak MSE ponderado con enfasis continuo dentro de la cola alta
         base_over_component = self._base_overprediction_penalty(y_pred=y_pred, y_true=y_true)  # Calcula penalizacion de falsas alarmas cuando el target esta en baseflow
 
         total_loss = (  # Combina los terminos solicitados para priorizar captura de picos sin perder control en baseflow

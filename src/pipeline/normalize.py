@@ -50,7 +50,7 @@ def normalize_splits(
     df_test: pd.DataFrame,
     feature_columns: List[str],
     target_col: str = "stormflow_mgd",
-    apply_log1p_to_target: bool = False,
+    apply_log1p_to_target: bool = True,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, object]]:
     """Normalize train/val/test with train-only Min-Max stats and optional log1p."""
     if target_col not in df_train.columns:  # Valida que el target exista en train para calcular sus estadisticas
