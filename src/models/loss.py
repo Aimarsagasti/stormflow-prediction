@@ -12,16 +12,18 @@ from src.pipeline.normalize import normalize_target_values  # Reutiliza la conve
 
 
 class CompositeLoss(nn.Module):
-    """Composite loss: weighted huber + asymmetric underprediction + peak mse."""
+    """Composite loss: weighted huber + asymmetric underprediction + peak mse + base overprediction penalty."""
 
     def __init__(
         self,
         p95_threshold: float,
         p99_threshold: float,
         p999_threshold: float,
+        baseflow_threshold: float = 0.5,
         huber_weight: float = 0.25,
         asym_weight: float = 0.20,
         peak_weight: float = 0.20,
+        base_over_weight: float = 0.12,
         huber_beta: float = 1.0,
         norm_params: Optional[Dict[str, object]] = None,
         thresholds_are_normalized: bool = False,
@@ -30,19 +32,22 @@ class CompositeLoss(nn.Module):
 
         if norm_params is not None and not thresholds_are_normalized:  # Convierte umbrales reales MGD al espacio de entrenamiento si hace falta
             normalized_thresholds = normalize_target_values(  # Usa util oficial del pipeline para respetar log1p y Min-Max del target
-                values=np.asarray([p95_threshold, p99_threshold, p999_threshold], dtype=float),  # Empaqueta umbrales crudos para transformarlos juntos
+                values=np.asarray([p95_threshold, p99_threshold, p999_threshold, baseflow_threshold], dtype=float),  # Empaqueta umbrales crudos para transformarlos juntos
                 norm_params=norm_params,  # Pasa parametros de normalizacion que definen la escala del entrenamiento
             )
             p95_threshold = float(normalized_thresholds[0])  # Sustituye P95 por su equivalente en escala normalizada
             p99_threshold = float(normalized_thresholds[1])  # Sustituye P99 por su equivalente en escala normalizada
             p999_threshold = float(normalized_thresholds[2])  # Sustituye P99.9 por su equivalente en escala normalizada
+            baseflow_threshold = float(normalized_thresholds[3])  # Sustituye umbral de baseflow por su equivalente en escala normalizada
 
         self.p95_threshold = float(p95_threshold)  # Guarda umbral P95 ya alineado con la escala de y_true
         self.p99_threshold = float(p99_threshold)  # Guarda umbral P99 ya alineado con la escala de y_true
         self.p999_threshold = float(p999_threshold)  # Guarda umbral P99.9 ya alineado con la escala de y_true
+        self.baseflow_threshold = float(baseflow_threshold)  # Guarda umbral de baseflow donde se debe suprimir sobreestimacion
         self.huber_weight = float(huber_weight)  # Guarda peso global de la componente robusta principal
         self.asym_weight = float(asym_weight)  # Guarda peso global de la penalizacion de infraestimacion
         self.peak_weight = float(peak_weight)  # Guarda peso global de la componente Peak MSE
+        self.base_over_weight = float(base_over_weight)  # Guarda peso de la penalizacion explicita de sobreestimacion en baseflow
         self.huber_base = nn.SmoothL1Loss(reduction="none", beta=huber_beta)  # Define Huber elemento a elemento para poder ponderar por muestra
 
     @staticmethod
@@ -72,6 +77,14 @@ class CompositeLoss(nn.Module):
         peak_values = squared_error * sample_weights  # Pondera el error cuadratico para mantener prioridad operacional en cola alta
         return self._masked_mean(peak_values, peak_mask)  # Calcula media solo en muestras de pico relevantes
 
+    def _base_overprediction_penalty(self, y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
+        base_mask = y_true <= self.baseflow_threshold  # Selecciona muestras en regimen base donde la falsa alarma es mas costosa operativamente
+        over_error = torch.relu(y_pred - y_true)  # Conserva solo sobreestimaciones para no castigar ligera subestimacion en base
+        threshold_floor = max(self.baseflow_threshold, 1e-6)  # Evita division por cero si el umbral configurado es extremadamente pequeno
+        near_zero_factor = torch.clamp((self.baseflow_threshold - y_true) / threshold_floor, min=0.0, max=1.0)  # Incrementa penalizacion cuanto mas cerca de cero este el target real
+        suppression_values = (over_error ** 2) * (1.0 + near_zero_factor)  # Penaliza cuadraticamente salidas infladas y refuerza el castigo cerca de cero
+        return self._masked_mean(suppression_values, base_mask)  # Promedia solo sobre muestras base para no interferir con la cola alta
+
     def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor, sample_weights: torch.Tensor) -> torch.Tensor:
         if y_pred.shape != y_true.shape:  # Valida que prediccion y target tengan misma forma (batch, 1)
             raise ValueError("y_pred and y_true must have the same shape")  # Mensaje claro para detectar errores de modelo o batching
@@ -81,10 +94,12 @@ class CompositeLoss(nn.Module):
         huber_component = self._weighted_huber(y_pred=y_pred, y_true=y_true, sample_weights=sample_weights)  # Calcula componente base robusta ponderada
         asym_component = self._asymmetric_underprediction(y_pred=y_pred, y_true=y_true, sample_weights=sample_weights)  # Calcula penalizacion asimetrica de infraestimacion en cola alta
         peak_component = self._peak_mse(y_pred=y_pred, y_true=y_true, sample_weights=sample_weights)  # Calcula Peak MSE ponderado solo sobre >= P95
+        base_over_component = self._base_overprediction_penalty(y_pred=y_pred, y_true=y_true)  # Calcula penalizacion de falsas alarmas cuando el target esta en baseflow
 
-        total_loss = (  # Combina los tres terminos solicitados para priorizar captura de picos sin perder robustez global
+        total_loss = (  # Combina los terminos solicitados para priorizar captura de picos sin perder control en baseflow
             self.huber_weight * huber_component  # Mantiene base robusta para toda la distribucion
             + self.asym_weight * asym_component  # Penaliza fuertemente infraestimaciones en eventos severos
             + self.peak_weight * peak_component  # Refuerza ajuste de magnitud en cola alta
+            + self.base_over_weight * base_over_component  # Suprime sobreestimacion sistematica en regimen base sin tocar la arquitectura
         )
         return total_loss  # Devuelve escalar final de perdida para backpropagation
