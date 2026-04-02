@@ -1,9 +1,16 @@
-"""Feature engineering utilities for MSD stormflow modeling."""
+﻿"""Feature engineering utilities for MSD stormflow modeling."""
 
 from __future__ import annotations  # Permite anotaciones modernas de tipos con compatibilidad amplia
 
 import numpy as np  # Aporta operaciones vectorizadas para calculos de series temporales
 import pandas as pd  # Ofrece estructura tabular y funciones rolling/datetime
+
+
+API_K_BASE = 0.90  # Define la persistencia base del API en condiciones termicas neutras
+API_ALPHA = 0.002  # Define cuanto cambia K por cada grado Fahrenheit respecto a la referencia
+API_TEMP_REF_F = 50.0  # Usa 50 F como referencia termica neutral para el decaimiento del API
+API_K_MIN = 0.80  # Evita que K baje demasiado y vuelva inestable la memoria hidrologica
+API_K_MAX = 0.98  # Evita que K suba demasiado y acumule memoria excesiva por muchos dias
 
 
 def _infer_resolution_minutes(timestamps: pd.Series) -> int:
@@ -43,9 +50,45 @@ def _add_rain_features(df_feat: pd.DataFrame, resolution_minutes: int) -> pd.Dat
     return df_feat  # Devuelve DataFrame con bloque de features de lluvia agregado
 
 
+def _prepare_temperature_feature(df_feat: pd.DataFrame) -> pd.DataFrame:
+    """Ensure daily temperature is available as a numeric feature without NaN."""
+    if "temp_daily_f" not in df_feat.columns:  # Mantiene compatibilidad si el loader no agrego aun la temperatura
+        df_feat["temp_daily_f"] = np.nan  # Crea la columna para poder aplicar fallback neutral mas adelante
+
+    df_feat["temp_daily_f"] = pd.to_numeric(  # Fuerza la columna de temperatura a formato numerico estable
+        df_feat["temp_daily_f"],  # Columna de temperatura diaria que llega desde el merge en carga
+        errors="coerce",  # Convierte valores raros a NaN para tratarlos de forma uniforme
+    )
+    missing_temperature_count = int(df_feat["temp_daily_f"].isna().sum())  # Cuenta filas sin temperatura valida antes del fallback
+    if missing_temperature_count > 0:  # Solo informa y rellena cuando realmente hay faltantes
+        print(f"[features] Temperatura diaria faltante; se usara fallback de {API_TEMP_REF_F:.1f} F en {missing_temperature_count} filas")  # Explica el fallback neutral aplicado
+        df_feat["temp_daily_f"] = df_feat["temp_daily_f"].fillna(API_TEMP_REF_F)  # Usa 50 F para no sesgar el decaimiento del API ni introducir NaN
+
+    return df_feat  # Devuelve el DataFrame con temperatura diaria lista para usar como feature directa
+
+
+def _compute_dynamic_api(rain_values: np.ndarray, temp_values: np.ndarray) -> np.ndarray:
+    """Compute sequential API with temperature-modulated decay."""
+    api_values = np.zeros(shape=rain_values.shape[0], dtype=float)  # Reserva el arreglo de salida para el API secuencial
+    previous_api = 0.0  # Inicializa el API previo en cero al inicio de la serie
+
+    for row_index, rain_value in enumerate(rain_values):  # Recorre secuencialmente porque cada paso depende del anterior
+        temperature_value = temp_values[row_index]  # Toma la temperatura diaria ya alineada con el timestamp actual
+        if np.isfinite(temperature_value):  # Usa la temperatura real cuando esta disponible
+            k_value = API_K_BASE - (API_ALPHA * (temperature_value - API_TEMP_REF_F))  # Modula K para acelerar secado con calor y frenarlo con frio
+        else:  # Mantiene un comportamiento estable si aun asi apareciera algun NaN residual
+            k_value = API_K_BASE  # Aplica el K base como fallback neutral pedido
+        k_value = float(np.clip(k_value, API_K_MIN, API_K_MAX))  # Clampea K dentro del rango estable especificado por el usuario
+        current_api = float(rain_value) + (k_value * previous_api)  # Aplica la recurrencia API(t) = rain(t) + K(t) * API(t-1)
+        api_values[row_index] = current_api  # Guarda el valor actual del API para este timestamp
+        previous_api = current_api  # Propaga el estado al siguiente paso de la secuencia
+
+    return api_values  # Devuelve la serie completa del API dinamico ya calculada
+
+
 def create_features(df_clean: pd.DataFrame) -> pd.DataFrame:
     """Create model features, target, and auxiliary columns from cleaned time series."""
-    required_columns = ["timestamp", "rain_in", "flow_total_mgd", "stormflow_mgd", "is_event"]  # Define solo columnas necesarias para una version mas operativa del modelo
+    required_columns = ["timestamp", "rain_in", "flow_total_mgd", "stormflow_mgd", "is_event"]  # Define columnas estrictamente necesarias para construir el set de features
     missing_columns = [column for column in required_columns if column not in df_clean.columns]  # Detecta columnas faltantes en entrada
     if missing_columns:  # Valida esquema para fallar con mensaje claro en Colab
         raise ValueError(f"Missing required columns for feature engineering: {missing_columns}")  # Lanza error explicito para facilitar depuracion
@@ -56,6 +99,14 @@ def create_features(df_clean: pd.DataFrame) -> pd.DataFrame:
     resolution_minutes = _infer_resolution_minutes(df_feat["timestamp"])  # Estima resolucion para convertir ventanas en minutos a pasos
 
     df_feat = _add_rain_features(df_feat, resolution_minutes)  # Agrega rolling sums, rolling max y recencia de lluvia
+    df_feat = _prepare_temperature_feature(df_feat)  # Asegura que la temperatura diaria este disponible como feature directa sin NaN
+
+    rain_values = pd.to_numeric(  # Convierte lluvia a vector float para el calculo recursivo del API
+        df_feat["rain_in"],  # Serie de lluvia incremental a 5 minutos
+        errors="coerce",  # Protege frente a valores inesperados aunque no deberian existir
+    ).fillna(0.0).to_numpy(dtype=float)  # Lleva cualquier faltante eventual a cero para no romper la recurrencia
+    temp_values = df_feat["temp_daily_f"].to_numpy(dtype=float)  # Extrae temperatura diaria ya alineada para modular K en cada paso
+    df_feat["api_dynamic"] = _compute_dynamic_api(rain_values=rain_values, temp_values=temp_values)  # Reintroduce el API dinamico con memoria secuencial dependiente de temperatura
 
     steps_5m = max(int(5 / resolution_minutes), 1)  # Traduce 5 minutos al numero de pasos de la serie
     steps_10m = max(int(10 / resolution_minutes), 1)  # Traduce 10 minutos al numero de pasos de la serie
@@ -77,6 +128,8 @@ def create_features(df_clean: pd.DataFrame) -> pd.DataFrame:
     feature_columns = [  # Enumera columnas de entrada que iran al modelo
         "rain_in",  # Mantiene lluvia base como feature primaria causal
         "flow_total_mgd",  # Mantiene flujo total por su alta correlacion con stormflow
+        "temp_daily_f",  # Agrega temperatura diaria directa porque modula respuesta hidrologica y evaporacion
+        "api_dynamic",  # Reincorpora el API con memoria de humedad antecedente sensible a temperatura
         "rain_sum_10m",  # Acumulado de lluvia en ventana corta de respuesta rapida
         "rain_sum_15m",  # Acumulado de lluvia en 15 minutos
         "rain_sum_30m",  # Acumulado de lluvia en media hora

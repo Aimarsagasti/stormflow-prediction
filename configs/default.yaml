@@ -7,6 +7,7 @@ data:
   base_paths:
     - '/content/drive/MyDrive/Proyecto de capstone/Archivos del proyecto/Largos/MC-CL-005/1parte/'
     - '/content/drive/MyDrive/Proyecto de capstone/Archivos del proyecto/Largos/MC-CL-005/2parte/'
+  temperature_daily_path: '/content/drive/.shortcut-targets-by-id/1xGRwVQHSkN11f9PxxArnsSTGyCyXuGym/MC-CL-005/daily_temperatures_2006_2026.tsf'
   events_filename: 'lstEventsGenerated Events 0.dat'
   tsf_files:
     rain: 'rain_list.tsf'
