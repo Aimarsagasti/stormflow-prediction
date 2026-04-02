@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Tuple  # Define tipos explicitos para estruc
 
 import numpy as np  # Aporta operaciones vectorizadas para estadisticas y metricas
 import pandas as pd  # Permite leer columnas de los splits normalizados de forma consistente
+import torch  # Permite ejecutar inferencia y permutaciones sobre tensores del modelo
+from torch.utils.data import DataLoader  # Tipa el DataLoader usado en permutation importance
 
 from src.pipeline.normalize import denormalize_target  # Reutiliza la desnormalizacion oficial del pipeline
 
@@ -106,7 +108,7 @@ def _bias_by_severity(y_real_mgd: np.ndarray, y_pred_mgd: np.ndarray) -> Dict[st
 
         if not mask.any():  # Controla bucket sin muestras para evitar medias invalidas
             results[bucket_name] = {"bias": float("nan"), "n_samples": 0.0}  # Guarda salida vacia manteniendo estructura
-            continue  # Continúa con el siguiente bucket sin intentar calculos adicionales
+            continue  # Continua con el siguiente bucket sin intentar calculos adicionales
 
         bucket_bias = float(np.mean(y_pred_mgd[mask] - y_real_mgd[mask]))  # Calcula sesgo firmado (pred-real) en bucket actual
         results[bucket_name] = {"bias": bucket_bias, "n_samples": float(mask.sum())}  # Guarda bias y conteo para trazabilidad
@@ -139,6 +141,120 @@ def _top_peak_ratios(y_real_mgd: np.ndarray, y_pred_mgd: np.ndarray, top_k: int 
 
     return peak_rows  # Devuelve lista con detalle de top-10 picos reales
 
+
+def _extract_xy_from_batch(
+    batch: Tuple[torch.Tensor, ...],
+    resolved_device: torch.device,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Extract X and y from a training batch with 3 or 4 tensors."""
+    if len(batch) == 4:  # Soporta loaders con metadata adicional de evento
+        x_batch, y_batch, _w_batch, _event_batch = batch  # Ignora pesos y metadata porque solo se requiere inferencia
+    elif len(batch) == 3:  # Soporta loaders clasicos que solo entregan X, y y pesos
+        x_batch, y_batch, _w_batch = batch  # Ignora pesos en este diagnostico porque RMSE usa pred y target
+    else:  # Detecta formatos inesperados para evitar errores silenciosos
+        raise ValueError("Expected dataloader batches with 3 or 4 tensors")  # Lanza error claro para depuracion del pipeline
+    x_batch = x_batch.to(resolved_device)  # Mueve features al dispositivo de inferencia configurado
+    y_batch = y_batch.to(resolved_device)  # Mueve target al mismo dispositivo para alinear comparacion
+    return x_batch, y_batch  # Devuelve solo tensores necesarios para prediccion y RMSE
+
+def _predict_over_loader(
+    model: torch.nn.Module,
+    dataloader: DataLoader,
+    resolved_device: torch.device,
+    permuted_feature_index: int | None = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Run inference over a loader, optionally permuting one feature column."""
+    predictions: List[np.ndarray] = []  # Acumula predicciones batch a batch para concatenar al final
+    targets: List[np.ndarray] = []  # Acumula targets reales batch a batch para medir RMSE comparable
+    with torch.no_grad():  # Desactiva gradientes porque este flujo es solo diagnostico
+        for batch in dataloader:  # Recorre todos los batches del dataloader recibido
+            x_batch, y_batch = _extract_xy_from_batch(  # Reutiliza rutina comun para aceptar firmas 3 o 4 tensores
+                batch=batch,  # Pasa el batch crudo emitido por el DataLoader
+                resolved_device=resolved_device,  # Usa el dispositivo resuelto por la funcion llamadora
+            )
+            if permuted_feature_index is not None:  # Solo aplica permutacion cuando se evalua una feature especifica
+                if x_batch.ndim != 3:  # Valida forma esperada (batch, seq_length, n_features) antes de permutar
+                    raise ValueError("Expected x_batch with shape (batch, seq_length, n_features)")  # Lanza error claro si la forma del tensor no coincide
+                if not (0 <= permuted_feature_index < x_batch.shape[2]):  # Protege contra indices fuera de rango en columnas de features
+                    raise ValueError("permuted_feature_index is out of bounds for input features")  # Lanza error explicito para depuracion rapida
+                x_batch = x_batch.clone()  # Clona batch para no mutar el tensor original compartido por el DataLoader
+                feature_values = x_batch[:, :, permuted_feature_index].reshape(-1)  # Toma todos los valores de la feature en batch y tiempo
+                permutation_indices = torch.randperm(feature_values.numel(), device=resolved_device)  # Construye permutacion aleatoria en el mismo dispositivo
+                feature_values = feature_values[permutation_indices]  # Reordena valores para romper asociacion feature-target
+                x_batch[:, :, permuted_feature_index] = feature_values.view_as(x_batch[:, :, permuted_feature_index])  # Reescribe la feature permutada conservando forma original
+            y_pred = model(x_batch)  # Ejecuta forward del modelo con batch original o permutado
+            if not isinstance(y_pred, torch.Tensor):  # Valida firma de salida esperada para evitar incompatibilidades silenciosas
+                raise TypeError("Model output must be a torch.Tensor")  # Lanza error claro si la salida del modelo no es tensor
+            predictions.append(y_pred.detach().cpu().numpy().reshape(-1))  # Convierte prediccion a numpy 1D y la acumula
+            targets.append(y_batch.detach().cpu().numpy().reshape(-1))  # Convierte target a numpy 1D y lo acumula
+    if not predictions:  # Maneja loaders vacios para no romper concatenacion
+        return np.empty((0,), dtype=np.float32), np.empty((0,), dtype=np.float32)  # Devuelve arreglos vacios si no hubo batches
+    y_pred_array = np.concatenate(predictions, axis=0)  # Concatena predicciones de todos los batches en un unico vector
+    y_true_array = np.concatenate(targets, axis=0)  # Concatena targets reales de todos los batches en un unico vector
+    return y_pred_array, y_true_array  # Retorna pares comparables para calculo de RMSE
+
+def run_permutation_importance(
+    model: torch.nn.Module,
+    dataloader: DataLoader,
+    device: torch.device | str,
+    feature_columns: List[str],
+    norm_params: Dict[str, object],
+) -> List[Dict[str, float]]:
+    """Compute permutation importance ranking using RMSE delta per feature."""
+    resolved_device = torch.device(device)  # Normaliza dispositivo recibido para uso consistente en PyTorch
+    model = model.to(resolved_device)  # Mueve modelo al dispositivo de inferencia para evitar copias implicitas
+    model_was_training = model.training  # Guarda estado previo para restaurarlo al finalizar el diagnostico
+    model.eval()  # Fuerza modo evaluacion para desactivar dropout y estabilizar comparaciones
+    baseline_pred_norm, baseline_true_norm = _predict_over_loader(  # Obtiene baseline sin permutar ninguna feature
+        model=model,  # Reutiliza el mismo modelo entrenado para toda la comparacion
+        dataloader=dataloader,  # Recorre exactamente el mismo conjunto de muestras para baseline
+        resolved_device=resolved_device,  # Usa mismo dispositivo para mantener costos y precision comparables
+        permuted_feature_index=None,  # No permuta columnas en la corrida base
+    )
+    baseline_pred_mgd = denormalize_target(baseline_pred_norm, norm_params)  # Convierte predicciones baseline a MGD reales para interpretacion hidrologica
+    baseline_true_mgd = denormalize_target(baseline_true_norm, norm_params)  # Convierte target baseline a MGD reales con los mismos parametros
+    baseline_pred_mgd = np.clip(baseline_pred_mgd, a_min=0.0, a_max=None)  # Impone restriccion fisica de no negatividad en prediccion
+    baseline_true_mgd = np.clip(baseline_true_mgd, a_min=0.0, a_max=None)  # Impone restriccion fisica de no negatividad en target real
+    baseline_rmse_mgd = _safe_rmse(y_true=baseline_true_mgd, y_pred=baseline_pred_mgd)  # Calcula RMSE base en unidades reales
+    ranking_rows: List[Dict[str, float]] = []  # Inicializa lista de resultados por feature para ranking final
+    for feature_index, feature_name in enumerate(feature_columns):  # Recorre todas las columnas para estimar impacto individual
+        permuted_pred_norm, permuted_true_norm = _predict_over_loader(  # Ejecuta inferencia permutando solo la feature actual
+            model=model,  # Reutiliza mismo modelo para mantener comparabilidad
+            dataloader=dataloader,  # Recorre mismo conjunto para aislar efecto de la permutacion
+            resolved_device=resolved_device,  # Mantiene mismo dispositivo de ejecucion
+            permuted_feature_index=feature_index,  # Selecciona feature puntual a barajar en todos los batches
+        )
+        permuted_pred_mgd = denormalize_target(permuted_pred_norm, norm_params)  # Convierte predicciones permutadas a MGD reales
+        permuted_true_mgd = denormalize_target(permuted_true_norm, norm_params)  # Convierte target permutado a MGD reales para consistencia
+        permuted_pred_mgd = np.clip(permuted_pred_mgd, a_min=0.0, a_max=None)  # Mantiene restriccion fisica en predicciones permutadas
+        permuted_true_mgd = np.clip(permuted_true_mgd, a_min=0.0, a_max=None)  # Mantiene restriccion fisica en targets permutados
+        permuted_rmse_mgd = _safe_rmse(y_true=permuted_true_mgd, y_pred=permuted_pred_mgd)  # Calcula RMSE con feature perturbada
+        delta_rmse_mgd = float(permuted_rmse_mgd - baseline_rmse_mgd)  # Mide impacto absoluto de romper la feature en MGD
+        if np.isfinite(baseline_rmse_mgd) and baseline_rmse_mgd > 0.0:  # Evita division por cero al calcular cambio relativo
+            relative_increase_pct = float((delta_rmse_mgd / baseline_rmse_mgd) * 100.0)  # Convierte impacto a porcentaje relativo al baseline
+        else:  # Maneja baseline degenerado para no introducir infinidades en el ranking
+            relative_increase_pct = float("nan")  # Marca porcentaje como no definido cuando baseline no es util
+        ranking_rows.append(  # Agrega fila con metrica completa de importancia para la feature actual
+            {
+                "feature": str(feature_name),  # Guarda nombre de feature para lectura humana del ranking
+                "baseline_rmse_mgd": float(baseline_rmse_mgd),  # Repite RMSE base para trazabilidad en cada fila
+                "permuted_rmse_mgd": float(permuted_rmse_mgd),  # Guarda RMSE observado tras permutar la feature
+                "delta_rmse_mgd": delta_rmse_mgd,  # Guarda incremento absoluto de RMSE usado como importancia principal
+                "relative_increase_pct": relative_increase_pct,  # Guarda incremento relativo para comparar features de forma estandarizada
+            }
+        )
+    ranking_rows.sort(key=lambda row: row["delta_rmse_mgd"], reverse=True)  # Ordena de mayor a menor impacto para ranking final
+    print("[diag] === Permutation Importance (RMSE delta en MGD) ===")  # Imprime encabezado para separar esta seccion diagnostica
+    for rank_index, row in enumerate(ranking_rows, start=1):  # Recorre ranking ya ordenado para mostrar top de importancia
+        print(  # Reporta posicion, feature y cambios absolutos/relativos de RMSE
+            f"[diag] #{rank_index:02d} {row['feature']}: "
+            f"delta_rmse={row['delta_rmse_mgd']:.6f} MGD | "
+            f"permuted_rmse={row['permuted_rmse_mgd']:.6f} | "
+            f"rel_increase={row['relative_increase_pct']:.2f}%"
+        )
+    if model_was_training:  # Restaura estado original por si el llamador continua entrenando despues del diagnostico
+        model.train()  # Reactiva modo entrenamiento solo si el modelo estaba previamente en train
+    return ranking_rows  # Devuelve ranking serializable para guardar en JSON o markdown
 
 def run_full_diagnostics(
     y_pred_norm: np.ndarray,
@@ -310,4 +426,3 @@ def run_full_diagnostics(
     )
 
     return diagnostics  # Devuelve el diccionario completo para guardado posterior en JSON
-

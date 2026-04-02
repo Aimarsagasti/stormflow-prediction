@@ -53,7 +53,7 @@ def train_model(
     device = _resolve_device(config)  # Determina dispositivo de entrenamiento segun config o disponibilidad
     model = model.to(device)  # Mueve modelo al dispositivo objetivo para computo consistente
 
-    learning_rate = float(config.get("learning_rate", 1e-3))  # Usa LR recomendado si no viene override
+    learning_rate = float(config.get("learning_rate", 5e-4))  # Reduce LR por defecto para estabilizar arranque con features nuevas de escala distinta
     weight_decay = float(config.get("weight_decay", 1e-4))  # Usa weight decay recomendado si no viene override
     max_epochs = int(config.get("max_epochs", 80))  # Limita epocas segun propuesta para evitar sobreentrenamiento
     min_epochs = min(int(config.get("min_epochs", 20)), max_epochs)  # Fuerza una fase minima de aprendizaje antes de permitir early stopping
