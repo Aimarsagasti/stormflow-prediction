@@ -8,15 +8,12 @@ import numpy as np  # Aporta operaciones numericas robustas para escalado
 import pandas as pd  # Provee DataFrames para transformar cada split
 
 
-EPSILON = 1e-12  # Evita divisiones por cero cuando una columna es constante
-
-
 def _get_log_columns(
     feature_columns: List[str],
     target_col: str,
     apply_log1p_to_target: bool,
 ) -> List[str]:
-    """Return skewed columns that should receive log1p before Min-Max."""
+    """Return skewed columns that should receive log1p before scaling."""
     log_columns = []  # Acumula columnas sesgadas para transformacion logaritmica
     for column_name in feature_columns:  # Recorre cada feature candidata de entrada
         if column_name == "rain_in" or column_name.startswith("rain_sum_"):  # Selecciona lluvia base y acumulados segun proposal.md
@@ -35,12 +32,17 @@ def _apply_log_transform(df_split: pd.DataFrame, log_columns: List[str]) -> pd.D
     return df_out  # Devuelve DataFrame transformado en el espacio logaritmico
 
 
-def _minmax_scale(df_split: pd.DataFrame, columns: List[str], stats_min: Dict[str, float], stats_range: Dict[str, float]) -> pd.DataFrame:
-    """Scale columns with precomputed Min-Max statistics."""
+def _zscore_scale(
+    df_split: pd.DataFrame,
+    columns: List[str],
+    stats_mean: Dict[str, float],
+    stats_std: Dict[str, float],
+) -> pd.DataFrame:
+    """Scale columns with precomputed z-score statistics."""
     df_out = df_split.copy()  # Crea copia para no tocar el DataFrame original
     for column_name in columns:  # Itera por todas las columnas a normalizar
         if column_name in df_out.columns:  # Evita fallo si una columna no esta disponible en el split
-            df_out[column_name] = (df_out[column_name] - stats_min[column_name]) / stats_range[column_name]  # Aplica formula Min-Max con stats de train
+            df_out[column_name] = (df_out[column_name] - stats_mean[column_name]) / stats_std[column_name]  # Aplica z-score con stats de train
     return df_out  # Regresa DataFrame normalizado
 
 
@@ -52,7 +54,7 @@ def normalize_splits(
     target_col: str = "stormflow_mgd",
     apply_log1p_to_target: bool = True,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, object]]:
-    """Normalize train/val/test with train-only Min-Max stats and optional log1p."""
+    """Normalize train/val/test with train-only z-score stats and optional log1p."""
     if target_col not in df_train.columns:  # Valida que el target exista en train para calcular sus estadisticas
         raise ValueError(f"Target column '{target_col}' not found in train split")  # Da mensaje explicito para depuracion rapida
 
@@ -62,40 +64,37 @@ def normalize_splits(
         apply_log1p_to_target=apply_log1p_to_target,  # Indica si el target entra o no en transformacion logaritmica
     )
 
-    train_transformed = _apply_log_transform(df_train, log_columns)  # Transforma train antes de calcular min/max segun el pipeline propuesto
+    train_transformed = _apply_log_transform(df_train, log_columns)  # Transforma train antes de calcular estadisticas segun el pipeline propuesto
     val_transformed = _apply_log_transform(df_val, log_columns)  # Aplica misma transformacion en validacion para mantener consistencia
     test_transformed = _apply_log_transform(df_test, log_columns)  # Aplica misma transformacion en test para inferencia coherente
 
-    all_norm_columns = list(feature_columns) + [target_col]  # Construye conjunto final de columnas a escalar en Min-Max
-    stats_min: Dict[str, float] = {}  # Almacena minimos por columna calculados solo en train
-    stats_max: Dict[str, float] = {}  # Almacena maximos por columna calculados solo en train
-    stats_range: Dict[str, float] = {}  # Almacena rangos por columna para usar en escalado y desnormalizacion
+    all_norm_columns = list(feature_columns) + [target_col]  # Construye conjunto final de columnas a escalar en z-score
+    stats_mean: Dict[str, float] = {}  # Almacena medias por columna calculadas solo en train
+    stats_std: Dict[str, float] = {}  # Almacena desviaciones por columna para usar en escalado y desnormalizacion
 
     for column_name in all_norm_columns:  # Recorre features y target para extraer estadisticas base
         if column_name not in train_transformed.columns:  # Valida esquema esperado antes de continuar
             raise ValueError(f"Column '{column_name}' not found in train split")  # Falla de forma clara si falta alguna columna critica
-        col_min = float(train_transformed[column_name].min())  # Toma minimo de train para la columna
-        col_max = float(train_transformed[column_name].max())  # Toma maximo de train para la columna
-        col_range = max(col_max - col_min, EPSILON)  # Evita rango cero para no dividir por cero en columnas constantes
-        stats_min[column_name] = col_min  # Guarda minimo en diccionario de parametros
-        stats_max[column_name] = col_max  # Guarda maximo en diccionario de parametros
-        stats_range[column_name] = col_range  # Guarda rango util para normalizar y revertir
+        col_mean = float(train_transformed[column_name].mean())  # Calcula media de train para la columna
+        col_std_raw = float(train_transformed[column_name].std(ddof=0))  # Calcula desviacion estandar poblacional para estabilidad
+        col_std = col_std_raw if col_std_raw > 0.0 else 1.0  # Evita division por cero en columnas constantes
+        stats_mean[column_name] = col_mean  # Guarda media en diccionario de parametros
+        stats_std[column_name] = col_std  # Guarda desviacion estandar util para normalizar y revertir
 
-    df_train_norm = _minmax_scale(train_transformed, all_norm_columns, stats_min, stats_range)  # Escala train usando stats de train
-    df_val_norm = _minmax_scale(val_transformed, all_norm_columns, stats_min, stats_range)  # Escala val sin leakage de informacion futura
-    df_test_norm = _minmax_scale(test_transformed, all_norm_columns, stats_min, stats_range)  # Escala test con mismas reglas de entrenamiento
+    df_train_norm = _zscore_scale(train_transformed, all_norm_columns, stats_mean, stats_std)  # Escala train usando stats de train
+    df_val_norm = _zscore_scale(val_transformed, all_norm_columns, stats_mean, stats_std)  # Escala val sin leakage de informacion futura
+    df_test_norm = _zscore_scale(test_transformed, all_norm_columns, stats_mean, stats_std)  # Escala test con mismas reglas de entrenamiento
 
     norm_params: Dict[str, object] = {  # Empaqueta toda la informacion necesaria para reproducir transformacion e inversion
         "feature_columns": list(feature_columns),  # Conserva orden de features para reconstruir tensores luego
         "target_col": target_col,  # Guarda nombre del target normalizado
         "log1p_columns": log_columns,  # Lista columnas que recibieron transformacion log1p
         "apply_log1p_to_target": apply_log1p_to_target,  # Guarda bandera explicita para trazabilidad del target
-        "min": stats_min,  # Diccionario de minimos por columna
-        "max": stats_max,  # Diccionario de maximos por columna
-        "range": stats_range,  # Diccionario de rangos por columna
+        "mean": stats_mean,  # Diccionario de medias por columna
+        "std": stats_std,  # Diccionario de desviaciones por columna
     }
 
-    print(f"[normalize] Columnas con log1p: {log_columns}")  # Reporta columnas sesgadas transformadas antes del Min-Max
+    print(f"[normalize] Columnas con log1p: {log_columns}")  # Reporta columnas sesgadas transformadas antes del z-score
     print(f"[normalize] Shape train_norm: {df_train_norm.shape}")  # Reporta dimensiones finales del split train normalizado
     print(f"[normalize] Shape val_norm: {df_val_norm.shape}")  # Reporta dimensiones finales de validacion normalizada
     print(f"[normalize] Shape test_norm: {df_test_norm.shape}")  # Reporta dimensiones finales de test normalizado
@@ -109,22 +108,23 @@ def normalize_target_values(values: np.ndarray, norm_params: Dict[str, object]) 
     values_array = np.asarray(values, dtype=float)  # Convierte valores entrantes a arreglo numpy para transformar en bloque
     if target_col in norm_params.get("log1p_columns", []):  # Revisa si el target se comprimio con log1p al normalizar
         values_array = np.log1p(np.clip(values_array, a_min=0.0, a_max=None))  # Reproduce la misma transformacion sobre valores reales no negativos
-    target_min = float(norm_params["min"][target_col])  # Extrae minimo usado en Min-Max del target
-    target_range = float(norm_params["range"][target_col])  # Extrae rango usado en Min-Max del target
-    normalized_values = (values_array - target_min) / target_range  # Lleva los valores al mismo espacio de entrenamiento del modelo
+    target_mean = float(norm_params["mean"][target_col])  # Extrae media usada en z-score del target
+    target_std = float(norm_params["std"][target_col])  # Extrae desviacion usada en z-score del target
+    normalized_values = (values_array - target_mean) / target_std  # Lleva los valores al mismo espacio de entrenamiento del modelo
     return normalized_values  # Devuelve arreglo listo para comparar con y_true/y_pred normalizados
 
 
 def denormalize_target(y_norm: np.ndarray, norm_params: Dict[str, object]) -> np.ndarray:
     """Convert normalized target values back to real-world units."""
     target_col = str(norm_params["target_col"])  # Recupera nombre del target para buscar sus parametros de escala
-    target_min = float(norm_params["min"][target_col])  # Extrae minimo de train usado en la normalizacion del target
-    target_range = float(norm_params["range"][target_col])  # Extrae rango de train usado en la normalizacion del target
+    target_mean = float(norm_params["mean"][target_col])  # Extrae media de train usada en la normalizacion del target
+    target_std = float(norm_params["std"][target_col])  # Extrae desviacion de train usada en la normalizacion del target
 
     y_norm_array = np.asarray(y_norm, dtype=float)  # Convierte entrada a arreglo numpy para operar de forma vectorizada
-    y_real = (y_norm_array * target_range) + target_min  # Revierte Min-Max al espacio transformado previo al escalado
+    y_real = (y_norm_array * target_std) + target_mean  # Revierte z-score al espacio transformado previo al escalado
 
     if target_col in norm_params.get("log1p_columns", []):  # Verifica si el target tambien usa log1p para revertir completamente
         y_real = np.expm1(y_real)  # Revierte log1p y devuelve valores reales en unidades originales
 
+    y_real = np.clip(y_real, a_min=0.0, a_max=None)  # Impone no negatividad por consistencia fisica del stormflow
     return y_real  # Devuelve target en escala fisica para interpretacion y metricas
