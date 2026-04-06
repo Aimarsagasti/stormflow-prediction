@@ -1,156 +1,107 @@
 [
   {
-    "feature": "minutes_since_last_rain",
-    "baseline_rmse_mgd": 3.054327401278752,
-    "permuted_rmse_mgd": 3.3352988881327224,
-    "delta_rmse_mgd": 0.28097148685397055,
-    "relative_increase_pct": 9.19912798923706
+    "feature": "rain_max_10m",
+    "baseline_rmse_mgd": 3.6029294844857445,
+    "permuted_rmse_mgd": 8.596643430618439,
+    "delta_rmse_mgd": 4.9937139461326945,
+    "relative_increase_pct": 138.60148991634958
   },
   {
-    "feature": "rain_max_30m",
-    "baseline_rmse_mgd": 3.054327401278752,
-    "permuted_rmse_mgd": 3.246354506399712,
-    "delta_rmse_mgd": 0.19202710512096033,
-    "relative_increase_pct": 6.287050466186583
+    "feature": "minutes_since_last_rain",
+    "baseline_rmse_mgd": 3.6029294844857445,
+    "permuted_rmse_mgd": 3.804130556080293,
+    "delta_rmse_mgd": 0.2012010715945487,
+    "relative_increase_pct": 5.5843743948063045
   },
   {
     "feature": "delta_flow_15m",
-    "baseline_rmse_mgd": 3.054327401278752,
-    "permuted_rmse_mgd": 3.2002649215799974,
-    "delta_rmse_mgd": 0.14593752030124563,
-    "relative_increase_pct": 4.778057527170994
+    "baseline_rmse_mgd": 3.6029294844857445,
+    "permuted_rmse_mgd": 3.7760636525800426,
+    "delta_rmse_mgd": 0.17313416809429816,
+    "relative_increase_pct": 4.805372096229356
   },
   {
-    "feature": "rain_max_10m",
-    "baseline_rmse_mgd": 3.054327401278752,
-    "permuted_rmse_mgd": 3.198896750796464,
-    "delta_rmse_mgd": 0.14456934951771228,
-    "relative_increase_pct": 4.733263024035524
-  },
-  {
-    "feature": "delta_rain_10m",
-    "baseline_rmse_mgd": 3.054327401278752,
-    "permuted_rmse_mgd": 3.1544838959811794,
-    "delta_rmse_mgd": 0.1001564947024276,
-    "relative_increase_pct": 3.279166950487862
-  },
-  {
-    "feature": "rain_sum_10m",
-    "baseline_rmse_mgd": 3.054327401278752,
-    "permuted_rmse_mgd": 3.1441732490918146,
-    "delta_rmse_mgd": 0.08984584781306282,
-    "relative_increase_pct": 2.9415919123616923
-  },
-  {
-    "feature": "rain_in",
-    "baseline_rmse_mgd": 3.054327401278752,
-    "permuted_rmse_mgd": 3.1153012664303903,
-    "delta_rmse_mgd": 0.060973865151638496,
-    "relative_increase_pct": 1.9963107139761977
-  },
-  {
-    "feature": "rain_sum_15m",
-    "baseline_rmse_mgd": 3.054327401278752,
-    "permuted_rmse_mgd": 3.0977084430924293,
-    "delta_rmse_mgd": 0.04338104181367752,
-    "relative_increase_pct": 1.4203140696545902
-  },
-  {
-    "feature": "delta_flow_5m",
-    "baseline_rmse_mgd": 3.054327401278752,
-    "permuted_rmse_mgd": 3.0911661000186212,
-    "delta_rmse_mgd": 0.03683869873986945,
-    "relative_increase_pct": 1.2061149280999224
-  },
-  {
-    "feature": "rain_sum_30m",
-    "baseline_rmse_mgd": 3.054327401278752,
-    "permuted_rmse_mgd": 3.089825116859539,
-    "delta_rmse_mgd": 0.0354977155807874,
-    "relative_increase_pct": 1.1622105595466161
-  },
-  {
-    "feature": "rain_max_60m",
-    "baseline_rmse_mgd": 3.054327401278752,
-    "permuted_rmse_mgd": 3.0835929346145523,
-    "delta_rmse_mgd": 0.02926553333580051,
-    "relative_increase_pct": 0.9581662176604886
+    "feature": "rain_max_30m",
+    "baseline_rmse_mgd": 3.6029294844857445,
+    "permuted_rmse_mgd": 3.6699899910248823,
+    "delta_rmse_mgd": 0.06706050653913787,
+    "relative_increase_pct": 1.861277241974931
   },
   {
     "feature": "delta_rain_30m",
-    "baseline_rmse_mgd": 3.054327401278752,
-    "permuted_rmse_mgd": 3.074573563963056,
-    "delta_rmse_mgd": 0.020246162684304014,
-    "relative_increase_pct": 0.6628681219907065
+    "baseline_rmse_mgd": 3.6029294844857445,
+    "permuted_rmse_mgd": 3.654915602092834,
+    "delta_rmse_mgd": 0.05198611760708971,
+    "relative_increase_pct": 1.4428846812279432
   },
   {
-    "feature": "temp_daily_f",
-    "baseline_rmse_mgd": 3.054327401278752,
-    "permuted_rmse_mgd": 3.057295190843005,
-    "delta_rmse_mgd": 0.0029677895642530316,
-    "relative_increase_pct": 0.0971667137914066
+    "feature": "delta_flow_5m",
+    "baseline_rmse_mgd": 3.6029294844857445,
+    "permuted_rmse_mgd": 3.624052470428982,
+    "delta_rmse_mgd": 0.02112298594323736,
+    "relative_increase_pct": 0.5862725327873659
+  },
+  {
+    "feature": "rain_sum_10m",
+    "baseline_rmse_mgd": 3.6029294844857445,
+    "permuted_rmse_mgd": 3.611757367795351,
+    "delta_rmse_mgd": 0.008827883309606488,
+    "relative_increase_pct": 0.24501959718111205
   },
   {
     "feature": "month_cos",
-    "baseline_rmse_mgd": 3.054327401278752,
-    "permuted_rmse_mgd": 3.05461917320558,
-    "delta_rmse_mgd": 0.00029177192682805497,
-    "relative_increase_pct": 0.009552739064774102
+    "baseline_rmse_mgd": 3.6029294844857445,
+    "permuted_rmse_mgd": 3.602785073367044,
+    "delta_rmse_mgd": -0.00014441111870056034,
+    "relative_increase_pct": -0.004008158342326606
   },
   {
     "feature": "month_sin",
-    "baseline_rmse_mgd": 3.054327401278752,
-    "permuted_rmse_mgd": 3.054264963852061,
-    "delta_rmse_mgd": -6.243742669065355e-05,
-    "relative_increase_pct": -0.002044228351699066
+    "baseline_rmse_mgd": 3.6029294844857445,
+    "permuted_rmse_mgd": 3.6027668697389763,
+    "delta_rmse_mgd": -0.00016261474676815268,
+    "relative_increase_pct": -0.004513403536438158
   },
   {
-    "feature": "rain_sum_120m",
-    "baseline_rmse_mgd": 3.054327401278752,
-    "permuted_rmse_mgd": 3.053744617165358,
-    "delta_rmse_mgd": -0.0005827841133938527,
-    "relative_increase_pct": -0.01908060390480271
+    "feature": "temp_daily_f",
+    "baseline_rmse_mgd": 3.6029294844857445,
+    "permuted_rmse_mgd": 3.6013161752719487,
+    "delta_rmse_mgd": -0.001613309213795766,
+    "relative_increase_pct": -0.044777707161427774
   },
   {
-    "feature": "rain_sum_60m",
-    "baseline_rmse_mgd": 3.054327401278752,
-    "permuted_rmse_mgd": 3.04680625841247,
-    "delta_rmse_mgd": -0.007521142866281583,
-    "relative_increase_pct": -0.24624547005447792
+    "feature": "delta_rain_10m",
+    "baseline_rmse_mgd": 3.6029294844857445,
+    "permuted_rmse_mgd": 3.5762701283172165,
+    "delta_rmse_mgd": -0.026659356168527992,
+    "relative_increase_pct": -0.7399355519813386
   },
   {
-    "feature": "hour_sin",
-    "baseline_rmse_mgd": 3.054327401278752,
-    "permuted_rmse_mgd": 3.0382514095238315,
-    "delta_rmse_mgd": -0.01607599175492025,
-    "relative_increase_pct": -0.5263349223200411
+    "feature": "rain_max_60m",
+    "baseline_rmse_mgd": 3.6029294844857445,
+    "permuted_rmse_mgd": 3.562159357777892,
+    "delta_rmse_mgd": -0.040770126707852405,
+    "relative_increase_pct": -1.131582699117733
   },
   {
-    "feature": "api_dynamic",
-    "baseline_rmse_mgd": 3.054327401278752,
-    "permuted_rmse_mgd": 3.0338752821666763,
-    "delta_rmse_mgd": -0.02045211911207545,
-    "relative_increase_pct": -0.6696112245043797
+    "feature": "rain_in",
+    "baseline_rmse_mgd": 3.6029294844857445,
+    "permuted_rmse_mgd": 3.5537737613245213,
+    "delta_rmse_mgd": -0.049155723161223186,
+    "relative_increase_pct": -1.364326539636379
   },
   {
-    "feature": "hour_cos",
-    "baseline_rmse_mgd": 3.054327401278752,
-    "permuted_rmse_mgd": 3.022800224320847,
-    "delta_rmse_mgd": -0.03152717695790486,
-    "relative_increase_pct": -1.0322134079242917
+    "feature": "rain_sum_30m",
+    "baseline_rmse_mgd": 3.6029294844857445,
+    "permuted_rmse_mgd": 3.3854699556199317,
+    "delta_rmse_mgd": -0.21745952886581277,
+    "relative_increase_pct": -6.035630999779373
   },
   {
-    "feature": "rain_sum_180m",
-    "baseline_rmse_mgd": 3.054327401278752,
-    "permuted_rmse_mgd": 3.0169896408907055,
-    "delta_rmse_mgd": -0.03733776038804626,
-    "relative_increase_pct": -1.2224544222866907
-  },
-  {
-    "feature": "rain_sum_360m",
-    "baseline_rmse_mgd": 3.054327401278752,
-    "permuted_rmse_mgd": 3.0045240706165104,
-    "delta_rmse_mgd": -0.04980333066224141,
-    "relative_increase_pct": -1.63058258395581
+    "feature": "rain_sum_15m",
+    "baseline_rmse_mgd": 3.6029294844857445,
+    "permuted_rmse_mgd": 3.3786756669152815,
+    "delta_rmse_mgd": -0.22425381757046292,
+    "relative_increase_pct": -6.22420778802645
   }
 ]
