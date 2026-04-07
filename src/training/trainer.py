@@ -9,7 +9,7 @@ import numpy as np  # Aporta conversion a arreglos para prediccion y reportes
 import torch  # Provee tensores y operaciones de entrenamiento en CPU/GPU
 from torch import nn  # Incluye tipos de modulos y funciones de perdida
 from torch.optim import AdamW  # Optimizer recomendado en la propuesta
-from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts  # Scheduler con reinicios para explorar LR periodicamente
+from torch.optim.lr_scheduler import ReduceLROnPlateau  # Scheduler recomendado para ajustar LR por validacion
 from torch.utils.data import DataLoader  # Tipo de entrada para loaders de train/val/test
 from src.models.tcn import TwoStageTCN  # Importa la clase two-stage para detectar comportamiento especial
 
@@ -68,11 +68,11 @@ def train_model(
         lr=learning_rate,  # Configura tasa de aprendizaje inicial
         weight_decay=weight_decay,  # Configura regularizacion L2 desacoplada
     )
-    scheduler = CosineAnnealingWarmRestarts(  # Inicializa scheduler con ciclos crecientes para escapar de minimos locales
+    scheduler = ReduceLROnPlateau(  # Inicializa scheduler que reduce LR cuando se estanca val_loss
         optimizer=optimizer,  # Conecta scheduler al optimizer de entrenamiento
-        T_0=10,  # Define primer ciclo de 10 epochs antes del primer restart
-        T_mult=2,  # Duplica la duracion del ciclo en cada restart (10, 20, 40...)
-        eta_min=1e-6,  # Define LR minimo para evitar colapsar a cero
+        mode="min",  # Minimiza metrica de validacion (val_loss)
+        factor=0.5,  # Reduce LR a la mitad cuando no hay mejora
+        patience=4,  # Espera 4 epochs sin mejora antes de reducir LR
     )
 
     history: Dict[str, Any] = {  # Prepara contenedor de historia para monitoreo y analisis posterior
@@ -171,7 +171,7 @@ def train_model(
         val_cls_loss_epoch = val_cls_loss_sum / max(val_batches, 1)  # Calcula promedio de clasificacion en validacion si aplica
         val_reg_loss_epoch = val_reg_loss_sum / max(val_batches, 1)  # Calcula promedio de regresion en validacion si aplica
 
-        scheduler.step()  # Avanza el scheduler por epoch sin depender de la metrica
+        scheduler.step(val_loss_epoch)  # Actualiza scheduler con metrica de validacion para adaptar LR
         current_lr = float(optimizer.param_groups[0]["lr"])  # Obtiene LR actual para imprimir diagnostico por epoca
 
         history["train_loss"].append(train_loss_epoch)  # Guarda train_loss en historia para analisis posterior
