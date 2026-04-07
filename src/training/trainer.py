@@ -9,7 +9,7 @@ import numpy as np  # Aporta conversion a arreglos para prediccion y reportes
 import torch  # Provee tensores y operaciones de entrenamiento en CPU/GPU
 from torch import nn  # Incluye tipos de modulos y funciones de perdida
 from torch.optim import AdamW  # Optimizer recomendado en la propuesta
-from torch.optim.lr_scheduler import ReduceLROnPlateau  # Scheduler recomendado para ajustar LR por validacion
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts  # Scheduler con reinicios para explorar LR periodicamente
 from torch.utils.data import DataLoader  # Tipo de entrada para loaders de train/val/test
 from src.models.tcn import TwoStageTCN  # Importa la clase two-stage para detectar comportamiento especial
 
@@ -50,7 +50,7 @@ def train_model(
     criterion: nn.Module,
     config: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Train model with AdamW, ReduceLROnPlateau, grad clipping, and safer early stopping."""
+    """Train model with AdamW, cosine restarts, grad clipping, and safer early stopping."""
     device = _resolve_device(config)  # Determina dispositivo de entrenamiento segun config o disponibilidad
     model = model.to(device)  # Mueve modelo al dispositivo objetivo para computo consistente
     is_two_stage = isinstance(model, TwoStageTCN)  # Detecta si el modelo usa salida dict y entrenamiento two-stage
@@ -62,19 +62,17 @@ def train_model(
     grad_clip_max_norm = float(config.get("grad_clip_max_norm", 1.0))  # Define clipping de gradiente recomendado
     early_stopping_patience = int(config.get("early_stopping_patience", 8))  # Aumenta paciencia para no cortar demasiado pronto una validacion ruidosa
     early_stopping_min_delta = float(config.get("early_stopping_min_delta", 5e-5))  # Reduce min_delta para aceptar mejoras pequenas pero reales en tareas raras
-    scheduler_factor = float(config.get("scheduler_factor", 0.5))  # Define cuanto se reduce el LR al estancarse la validacion
-    scheduler_patience = int(config.get("scheduler_patience", 3))  # Da un poco mas de margen antes de bajar LR en validacion ruidosa
 
     optimizer = AdamW(  # Inicializa optimizer AdamW con hiperparametros de propuesta
         model.parameters(),  # Optimiza todos los parametros entrenables del modelo
         lr=learning_rate,  # Configura tasa de aprendizaje inicial
         weight_decay=weight_decay,  # Configura regularizacion L2 desacoplada
     )
-    scheduler = ReduceLROnPlateau(  # Inicializa scheduler que reduce LR cuando se estanca val_loss
+    scheduler = CosineAnnealingWarmRestarts(  # Inicializa scheduler con ciclos crecientes para escapar de minimos locales
         optimizer=optimizer,  # Conecta scheduler al optimizer de entrenamiento
-        mode="min",  # Minimiza metrica de validacion (val_loss)
-        factor=scheduler_factor,  # Reduce LR segun factor configurable cuando no mejora
-        patience=scheduler_patience,  # Espera algunas epocas sin mejora antes de reducir LR
+        T_0=10,  # Define primer ciclo de 10 epochs antes del primer restart
+        T_mult=2,  # Duplica la duracion del ciclo en cada restart (10, 20, 40...)
+        eta_min=1e-6,  # Define LR minimo para evitar colapsar a cero
     )
 
     history: Dict[str, Any] = {  # Prepara contenedor de historia para monitoreo y analisis posterior
@@ -173,7 +171,7 @@ def train_model(
         val_cls_loss_epoch = val_cls_loss_sum / max(val_batches, 1)  # Calcula promedio de clasificacion en validacion si aplica
         val_reg_loss_epoch = val_reg_loss_sum / max(val_batches, 1)  # Calcula promedio de regresion en validacion si aplica
 
-        scheduler.step(val_loss_epoch)  # Actualiza scheduler con metrica de validacion para adaptar LR
+        scheduler.step()  # Avanza el scheduler por epoch sin depender de la metrica
         current_lr = float(optimizer.param_groups[0]["lr"])  # Obtiene LR actual para imprimir diagnostico por epoca
 
         history["train_loss"].append(train_loss_epoch)  # Guarda train_loss en historia para analisis posterior
@@ -289,4 +287,5 @@ def predict(
         "event_probabilities": np.concatenate(event_probabilities, axis=0) if event_probabilities else np.empty((0,), dtype=np.float32),  # Devuelve vector nulo para mantener compatibilidad con consumidores existentes
     }
     return y_pred_array, y_real_array, metadata  # Devuelve predicciones, targets y metadata auxiliar para evaluacion avanzada
+
 

@@ -8,6 +8,7 @@ import numpy as np  # Aporta operaciones vectorizadas para estadisticas y metric
 import pandas as pd  # Permite leer columnas de los splits normalizados de forma consistente
 import torch  # Permite ejecutar inferencia y permutaciones sobre tensores del modelo
 from torch.utils.data import DataLoader  # Tipa el DataLoader usado en permutation importance
+from src.models.tcn import TwoStageTCN  # Importa el modelo two-stage para usar su predict
 
 from src.pipeline.normalize import denormalize_target  # Reutiliza la desnormalizacion oficial del pipeline
 
@@ -165,6 +166,7 @@ def _predict_over_loader(
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Run inference over a loader, optionally permuting one feature column."""
     predictions: List[np.ndarray] = []  # Acumula predicciones batch a batch para concatenar al final
+    is_two_stage = isinstance(model, TwoStageTCN)  # Detecta si el modelo requiere switch duro en prediccion
     targets: List[np.ndarray] = []  # Acumula targets reales batch a batch para medir RMSE comparable
     with torch.no_grad():  # Desactiva gradientes porque este flujo es solo diagnostico
         for batch in dataloader:  # Recorre todos los batches del dataloader recibido
@@ -182,7 +184,10 @@ def _predict_over_loader(
                 permutation_indices = torch.randperm(feature_values.numel(), device=resolved_device)  # Construye permutacion aleatoria en el mismo dispositivo
                 feature_values = feature_values[permutation_indices]  # Reordena valores para romper asociacion feature-target
                 x_batch[:, :, permuted_feature_index] = feature_values.view_as(x_batch[:, :, permuted_feature_index])  # Reescribe la feature permutada conservando forma original
-            y_pred = model(x_batch)  # Ejecuta forward del modelo con batch original o permutado
+            if is_two_stage:  # Ejecuta prediccion con switch duro cuando el modelo es two-stage
+                y_pred = model.predict(x_batch, threshold=0.3)  # Usa umbral bajo para priorizar recall de eventos
+            else:  # Mantiene el forward directo cuando el modelo no es two-stage
+                y_pred = model(x_batch)  # Ejecuta forward clasico con batch original o permutado
             if not isinstance(y_pred, torch.Tensor):  # Valida firma de salida esperada para evitar incompatibilidades silenciosas
                 raise TypeError("Model output must be a torch.Tensor")  # Lanza error claro si la salida del modelo no es tensor
             predictions.append(y_pred.detach().cpu().numpy().reshape(-1))  # Convierte prediccion a numpy 1D y la acumula
