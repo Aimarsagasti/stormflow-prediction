@@ -172,3 +172,98 @@ class StormflowTCN(nn.Module):
         if print_result:  # Controla si se imprime diagnostico o solo se retorna el valor
             print(f"[tcn] Parametros entrenables: {trainable_params:,}")  # Muestra total de parametros con separador para legibilidad
         return trainable_params  # Retorna cantidad total de parametros entrenables
+
+
+class TwoStageTCN(nn.Module):
+    """Modelo Two-Stage con backbone compartido y dos cabezas\."""
+
+    def __init__(
+        self,
+        n_features: int,
+        num_channels: Sequence[int] | None = None,
+        dilations: Sequence[int] | None = None,
+        kernel_size: int = 3,
+        dropout: float = 0.2,
+    ) -> None:
+        super().__init__()  # Inicializa la clase base para registrar submodulos correctamente
+        self.n_features = n_features  # Guarda numero de features de entrada para referencia y depuracion
+        self.num_channels = list(num_channels) if num_channels is not None else [32, 64, 64, 64, 32]  # Define canales por bloque segun propuesta
+        self.dilations = list(dilations) if dilations is not None else [1, 2, 4, 8, 16]  # Define dilataciones por bloque segun propuesta
+        self.kernel_size = kernel_size  # Guarda kernel temporal para metodos de campo receptivo
+        self.dropout = dropout  # Guarda dropout global para bloques y cabezas del modelo
+
+        if len(self.num_channels) != len(self.dilations):  # Verifica consistencia entre numero de bloques y dilataciones
+            raise ValueError("num_channels and dilations must have the same length")  # Lanza error claro si hay configuracion inconsistente
+
+        self.input_projection = nn.Conv1d(  # Proyecta features de entrada a canales iniciales de la TCN
+            in_channels=n_features,  # Recibe numero de features por timestamp
+            out_channels=self.num_channels[0],  # Mapea al ancho del primer bloque residual
+            kernel_size=1,  # Usa Conv1x1 para mezclar features sin alterar longitud temporal
+        )
+
+        blocks: List[nn.Module] = []  # Acumula bloques residuales para construir la red temporal compartida
+        in_channels = self.num_channels[0]  # Inicializa canales de entrada del primer bloque
+        for out_channels, dilation in zip(self.num_channels, self.dilations):  # Recorre canales y dilataciones definidos por bloque
+            block = TCNResidualBlock(  # Crea bloque residual causal para la escala temporal actual
+                in_channels=in_channels,  # Usa ancho actual de la representacion temporal
+                out_channels=out_channels,  # Configura ancho de salida del bloque
+                kernel_size=self.kernel_size,  # Usa kernel comun a toda la arquitectura
+                dilation=dilation,  # Usa dilatacion especifica del bloque
+                dropout=self.dropout,  # Usa dropout definido a nivel de modelo
+            )
+            blocks.append(block)  # Agrega bloque creado a la lista secuencial
+            in_channels = out_channels  # Actualiza canales de entrada para el siguiente bloque
+        self.tcn_blocks = nn.Sequential(*blocks)  # Empaqueta bloques en una secuencia ejecutable
+
+        final_channels = self.num_channels[-1]  # Obtiene canales finales tras el ultimo bloque TCN
+        self.classifier_head = nn.Sequential(  # Define cabeza binaria para detectar presencia de evento
+            nn.Linear(final_channels, 64),  # Expande estado causal para una decision binaria mas estable
+            nn.ReLU(),  # Introduce no linealidad para separar eventos de no-eventos
+            nn.Dropout(self.dropout),  # Regulariza la cabeza para reducir sobreajuste en clases raras
+            nn.Linear(64, 1),  # Proyecta a un logit/score escalar por muestra
+            nn.Sigmoid(),  # Convierte score a probabilidad de evento en [0, 1]
+        )
+        self.regressor_head = nn.Sequential(  # Define cabeza de regresion para magnitud de stormflow
+            nn.Linear(final_channels, 128),  # Aumenta capacidad para modelar magnitudes extremas
+            nn.ReLU(),  # Introduce no linealidad para capturar relacion lluvia->magnitud
+            nn.Dropout(self.dropout),  # Regulariza activaciones para evitar sobreajuste
+            nn.Linear(128, 64),  # Reduce dimensionalidad manteniendo capacidad suficiente
+            nn.ReLU(),  # Aplica no linealidad adicional antes de la salida
+            nn.Linear(64, 1),  # Produce una sola prediccion continua de stormflow
+        )
+
+    def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
+        if x.ndim != 3:  # Valida forma esperada (batch, seq_length, n_features)
+            raise ValueError("Input tensor must have shape (batch, seq_length, n_features)")  # Mensaje claro para depurar entradas mal formadas
+
+        x = x.transpose(1, 2)  # Reordena a (batch, n_features, seq_length) para Conv1d de PyTorch
+        x = self.input_projection(x)  # Proyecta features de entrada al espacio de canales de la TCN
+        x = self.tcn_blocks(x)  # Procesa secuencia con bloques residuales causales multiescala
+
+        last_state = x[:, :, -1]  # Conserva el ultimo timestep causal como resumen del estado mas reciente
+        cls_prob = self.classifier_head(last_state)  # Produce probabilidad de evento en el batch
+        reg_value = self.regressor_head(last_state)  # Produce magnitud continua de stormflow en el batch
+        return {"cls_prob": cls_prob, "reg_value": reg_value}  # Devuelve diccionario con ambas salidas para la loss
+
+    def predict(self, x: torch.Tensor, threshold: float = 0.5) -> torch.Tensor:
+        outputs = self.forward(x)  # Ejecuta forward para obtener probabilidad y magnitud
+        cls_prob = outputs["cls_prob"]  # Extrae probabilidad de evento para aplicar el switch duro
+        reg_value = outputs["reg_value"]  # Extrae magnitud predicha por el regresor
+        zeros = torch.zeros_like(reg_value)  # Crea tensor cero para casos sin evento
+        return torch.where(cls_prob >= threshold, reg_value, zeros)  # Aplica switch duro sin gating multiplicativo
+
+    def compute_receptive_field(self, print_result: bool = True) -> int:
+        receptive_field = 1  # Inicializa campo receptivo en 1 para el timestep actual
+        for dilation in self.dilations:  # Recorre cada bloque para acumular cobertura temporal total
+            receptive_field += 2 * (self.kernel_size - 1) * dilation  # Suma aporte de dos convoluciones por bloque
+        if print_result:  # Permite imprimir o solo devolver el valor segun necesidad del usuario
+            print(f"[tcn] Campo receptivo: {receptive_field} timesteps")  # Reporta campo receptivo total en pasos de tiempo
+        return receptive_field  # Devuelve cobertura temporal efectiva del modelo
+
+    def count_parameters(self, print_result: bool = True) -> int:
+        trainable_params = sum(parameter.numel() for parameter in self.parameters() if parameter.requires_grad)  # Cuenta parametros entrenables para estimar complejidad
+        if print_result:  # Controla si se imprime diagnostico o solo se retorna el valor
+            print(f"[tcn] Parametros entrenables: {trainable_params:,}")  # Muestra total de parametros con separador para legibilidad
+        return trainable_params  # Retorna cantidad total de parametros entrenables
+
+

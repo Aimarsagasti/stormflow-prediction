@@ -108,3 +108,99 @@ class CompositeLoss(nn.Module):
             + self.base_over_weight * base_over_component  # Suprime sobreestimacion sistematica en regimen base sin tocar la arquitectura
         )
         return total_loss  # Devuelve escalar final de perdida para backpropagation
+
+
+class TwoStageLoss(nn.Module):
+    """Loss para entrenamiento two-stage con clasificacion y regresion separadas."""
+
+    def __init__(
+        self,
+        event_threshold: float = 0.5,
+        norm_params: Dict[str, object] | None = None,
+        cls_weight: float = 0.3,
+        reg_weight: float = 0.7,
+    ) -> None:
+        super().__init__()  # Inicializa clase base para registrar el modulo correctamente
+        if norm_params is None:  # Verifica que existan parametros de normalizacion para desnormalizar y_true
+            raise ValueError("norm_params must be provided for TwoStageLoss")  # Falla temprano si falta informacion critica
+
+        self.event_threshold = float(event_threshold)  # Guarda umbral real en MGD para definir evento
+        self.norm_params = norm_params  # Conserva parametros de normalizacion para desnormalizar dentro de la loss
+        self.cls_weight = float(cls_weight)  # Guarda peso del componente de clasificacion en la perdida total
+        self.reg_weight = float(reg_weight)  # Guarda peso del componente de regresion en la perdida total
+        self.huber_base = nn.SmoothL1Loss(reduction="none")  # Define Huber elemento a elemento para poder ponderar por muestra
+        self.last_cls_loss: torch.Tensor | None = None  # Guarda ultima loss de clasificacion para logging en el trainer
+        self.last_reg_loss: torch.Tensor | None = None  # Guarda ultima loss de regresion para logging en el trainer
+
+    def _denormalize_target(self, y_true: torch.Tensor) -> torch.Tensor:
+        target_col = str(self.norm_params["target_col"])  # Recupera nombre del target para acceder a sus parametros
+        target_mean = float(self.norm_params["mean"][target_col])  # Extrae media usada en z-score del target
+        target_std = float(self.norm_params["std"][target_col])  # Extrae desviacion usada en z-score del target
+        y_real = (y_true * target_std) + target_mean  # Revierte z-score al espacio transformado previo al escalado
+        if target_col in self.norm_params.get("log1p_columns", []):  # Verifica si el target usa log1p
+            y_real = torch.expm1(y_real)  # Revierte log1p para volver a MGD reales
+        y_real = torch.clamp(y_real, min=0.0)  # Impone no negatividad por consistencia fisica del stormflow
+        return y_real  # Devuelve valores reales en MGD para definir eventos
+
+    @staticmethod
+    def _compute_pos_weight(event_label: torch.Tensor) -> torch.Tensor:
+        positives = event_label.sum()  # Cuenta positivos del batch para balancear el BCE
+        negatives = event_label.numel() - positives  # Cuenta negativos del batch para balancear el BCE
+        if positives > 0:  # Evita division por cero cuando el batch no tiene eventos
+            return negatives / positives  # Calcula pos_weight como ratio neg/pos segun practica habitual
+        return torch.tensor(1.0, device=event_label.device, dtype=event_label.dtype)  # Fallback neutro si no hay positivos
+
+    def _weighted_bce(self, cls_prob: torch.Tensor, event_label: torch.Tensor) -> torch.Tensor:
+        eps = 1e-7  # Define epsilon para evitar log(0) en BCE
+        cls_prob = torch.clamp(cls_prob, min=eps, max=1.0 - eps)  # Limita probabilidades para estabilidad numerica
+        pos_weight = self._compute_pos_weight(event_label)  # Calcula pos_weight del batch para compensar desbalance
+        bce_values = (  # Implementa BCE con pos_weight manual porque usamos probabilidades ya pasadas por sigmoid
+            -(pos_weight * event_label * torch.log(cls_prob))  # Penaliza falsos negativos con mayor peso
+            - ((1.0 - event_label) * torch.log(1.0 - cls_prob))  # Penaliza falsos positivos con peso normal
+        )
+        return bce_values.mean()  # Devuelve BCE promedio del batch
+
+    def forward(
+        self,
+        model_output: Dict[str, torch.Tensor],
+        y_true: torch.Tensor,
+        sample_weights: torch.Tensor,
+    ) -> torch.Tensor:
+        if "cls_prob" not in model_output or "reg_value" not in model_output:  # Verifica que el modelo entregue ambas salidas
+            raise KeyError("model_output must contain 'cls_prob' and 'reg_value'")  # Falla claro si falta alguna salida
+
+        cls_prob = model_output["cls_prob"]  # Extrae probabilidades de evento desde la cabeza de clasificacion
+        reg_value = model_output["reg_value"]  # Extrae magnitud predicha desde la cabeza de regresion
+
+        if cls_prob.shape != y_true.shape:  # Valida forma esperada para clasificacion (batch, 1)
+            raise ValueError("cls_prob and y_true must have the same shape")  # Mensaje claro para depurar salidas mal formadas
+        if reg_value.shape != y_true.shape:  # Valida forma esperada para regresion (batch, 1)
+            raise ValueError("reg_value and y_true must have the same shape")  # Mensaje claro para depurar salidas mal formadas
+        if sample_weights.shape != y_true.shape:  # Valida pesos por muestra alineados con el target
+            raise ValueError("sample_weights must have the same shape as y_true")  # Mensaje claro para detectar desalineacion del loader
+
+        y_true_real = self._denormalize_target(y_true)  # Desnormaliza y_true para definir eventos en MGD reales
+        event_label = (y_true_real > self.event_threshold).float()  # Construye etiqueta binaria de evento con umbral real
+
+        cls_loss = self._weighted_bce(cls_prob=cls_prob, event_label=event_label)  # Calcula BCE con pos_weight dinamico
+
+        event_mask = (event_label == 1.0).squeeze(1)  # Crea mascara booleana para filtrar solo muestras con evento
+        if event_mask.any():  # Verifica si hay eventos en el batch antes de calcular la regresion
+            reg_pred = reg_value[event_mask]  # Selecciona predicciones de magnitud solo en eventos
+            reg_true = y_true[event_mask]  # Selecciona targets normalizados solo en eventos
+            reg_weights = sample_weights[event_mask]  # Selecciona pesos por muestra solo en eventos
+            huber_values = self.huber_base(reg_pred, reg_true)  # Calcula error Huber por muestra para regresion
+            under_mask = reg_pred < reg_true  # Detecta infraestimaciones para penalizarlas mas fuerte
+            huber_values = torch.where(under_mask, huber_values * 3.0, huber_values)  # Amplifica errores por infraestimacion
+            reg_loss = (huber_values * reg_weights).mean()  # Pondera por sample_weights y promedia sobre eventos
+        else:  # Si no hay eventos en el batch, no se puede entrenar el regresor
+            reg_loss = torch.zeros((), device=y_true.device, dtype=y_true.dtype)  # Usa cero escalar para no afectar el total
+
+        total_loss = (  # Combina perdidas de clasificacion y regresion con pesos configurables
+            (self.cls_weight * cls_loss)  # Controla impacto de la cabeza de clasificacion
+            + (self.reg_weight * reg_loss)  # Controla impacto de la cabeza de regresion
+        )
+
+        self.last_cls_loss = cls_loss.detach()  # Guarda loss de clasificacion para logging externo sin gradiente
+        self.last_reg_loss = reg_loss.detach()  # Guarda loss de regresion para logging externo sin gradiente
+        return total_loss  # Devuelve perdida total para backpropagation
