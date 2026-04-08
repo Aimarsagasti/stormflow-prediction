@@ -192,6 +192,13 @@ class TwoStageLoss(nn.Module):
             huber_values = self.huber_base(reg_pred, reg_true)  # Calcula error Huber por muestra para regresion
             under_mask = reg_pred < reg_true  # Detecta infraestimaciones para penalizarlas mas fuerte
             huber_values = torch.where(under_mask, huber_values * 3.0, huber_values)  # Amplifica errores por infraestimacion
+            # ─── Ponderación por magnitud real del evento ─────
+            # Eventos extremos (>50 MGD) generan 3-7x más gradiente
+            # que eventos pequeños (~2 MGD), forzando al regresor
+            # a aprender magnitudes altas en vez de colapsar a la media.
+            reg_true_real = self._denormalize_target(reg_true)  # Desnormaliza target a MGD para calcular peso
+            magnitude_weight = 1.0 + 0.05 * reg_true_real  # Factor proporcional: 1x base + 0.05 por cada MGD
+            huber_values = huber_values * magnitude_weight  # Aplica peso por magnitud al error de cada muestra
             reg_loss = (huber_values * reg_weights).mean()  # Pondera por sample_weights y promedia sobre eventos
         else:  # Si no hay eventos en el batch, no se puede entrenar el regresor
             reg_loss = torch.zeros((), device=y_true.device, dtype=y_true.dtype)  # Usa cero escalar para no afectar el total
