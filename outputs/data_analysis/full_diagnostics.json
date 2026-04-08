@@ -45,38 +45,38 @@
   },
   "prediction_diagnostics": {
     "global_metrics": {
-      "nse": -1.3613507323228222,
-      "rmse": 3.694631686685621,
-      "mae": 0.8893163799372161
+      "nse": -0.02925646262916959,
+      "rmse": 2.4392297204933597,
+      "mae": 0.5941923774045533
     },
     "severity_bias": {
       "base": {
-        "bias": 0.6117042928327229,
+        "bias": 0.3647039452038012,
         "n_samples": 152896.0
       },
       "pequeno": {
-        "bias": 2.1433068818800587,
+        "bias": 1.8755654165738735,
         "n_samples": 7178.0
       },
       "moderado": {
-        "bias": 3.9785684027969466,
+        "bias": 2.29220526053318,
         "n_samples": 4078.0
       },
       "grande": {
-        "bias": 1.4019086662136409,
+        "bias": -7.084925380080195,
         "n_samples": 1008.0
       },
       "extremo": {
-        "bias": -46.20249484919984,
+        "bias": -59.26368523303187,
         "n_samples": 58.0
       }
     },
     "peak_diagnostics": {
       "peak_real_mgd": 135.1509063026402,
-      "peak_pred_mgd": 724.7103672699733,
-      "peak_error_mgd": 589.559460967333,
-      "peak_error_pct": 436.223090984789,
-      "max_pred_mgd": 724.7103672699733,
+      "peak_pred_mgd": 96.96379171561732,
+      "peak_error_mgd": -38.18711458702289,
+      "peak_error_pct": -28.2551672287801,
+      "max_pred_mgd": 96.96379171561732,
       "max_real_mgd": 135.1509063026402
     },
     "top_10_peak_pred_real_ratios": [
@@ -84,22 +84,22 @@
         "rank": 1,
         "sample_index": 6112,
         "real_mgd": 135.1509063026402,
-        "pred_mgd": 41.220076589457285,
-        "pred_real_ratio": 0.30499297205713255
+        "pred_mgd": 13.252129312580022,
+        "pred_real_ratio": 0.098054313323692
       },
       {
         "rank": 2,
         "sample_index": 6113,
         "real_mgd": 133.1767819668825,
-        "pred_mgd": 66.30305636234101,
-        "pred_real_ratio": 0.497857474727305
+        "pred_mgd": 16.557287514267937,
+        "pred_real_ratio": 0.12432563146318773
       },
       {
         "rank": 3,
         "sample_index": 117606,
         "real_mgd": 104.86029124893709,
-        "pred_mgd": 34.27601007694676,
-        "pred_real_ratio": 0.32687311534903063
+        "pred_mgd": 15.392514267194718,
+        "pred_real_ratio": 0.14679068772232448
       },
       {
         "rank": 4,
@@ -119,29 +119,29 @@
         "rank": 6,
         "sample_index": 117608,
         "real_mgd": 104.17618492740274,
-        "pred_mgd": 25.59225862140806,
-        "pred_real_ratio": 0.24566323521294753
+        "pred_mgd": 9.887691435546394,
+        "pred_real_ratio": 0.09491316506202285
       },
       {
         "rank": 7,
         "sample_index": 117607,
         "real_mgd": 103.07530622020376,
-        "pred_mgd": 27.64590774842253,
-        "pred_real_ratio": 0.26821077484224504
+        "pred_mgd": 11.871291872904115,
+        "pred_real_ratio": 0.115171056077612
       },
       {
         "rank": 8,
         "sample_index": 99290,
         "real_mgd": 97.90431773833599,
-        "pred_mgd": 11.478458081219209,
-        "pred_real_ratio": 0.11724159206029211
+        "pred_mgd": 32.37413209987233,
+        "pred_real_ratio": 0.3306711373690082
       },
       {
         "rank": 9,
         "sample_index": 6114,
         "real_mgd": 93.51671278839406,
-        "pred_mgd": 45.54340008409725,
-        "pred_real_ratio": 0.48700813711396235
+        "pred_mgd": 17.647911850110322,
+        "pred_real_ratio": 0.18871398837599568
       },
       {
         "rank": 10,
@@ -153,12 +153,12 @@
     ]
   },
   "residual_diagnostics": {
-    "mean": 0.749735365008551,
-    "median": 0.22378633254212915,
-    "std": 3.6177617642289452,
-    "pct_overestimation_gt_2_mgd": 8.165575179459864,
-    "pct_underestimation_gt_2_mgd": 0.5538137491072401,
-    "corr_real_magnitude_vs_residual": -0.09629120720298182
+    "mean": 0.4115368633675829,
+    "median": 0.20918633267787443,
+    "std": 2.404262681037096,
+    "pct_overestimation_gt_2_mgd": 4.3621155079954965,
+    "pct_underestimation_gt_2_mgd": 0.7390235930709729,
+    "corr_real_magnitude_vs_residual": -0.45601979355492195
   },
   "normalization_diagnostics": {
     "effective_target_range_norm": {
