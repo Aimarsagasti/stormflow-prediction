@@ -45,38 +45,38 @@
   },
   "prediction_diagnostics": {
     "global_metrics": {
-      "nse": -0.5987660472429979,
-      "rmse": 3.0400684343025315,
-      "mae": 1.0539473746664545
+      "nse": -0.2272962567274397,
+      "rmse": 2.663579149114111,
+      "mae": 0.9024624678103388
     },
     "severity_bias": {
       "base": {
-        "bias": 0.7116968157791902,
+        "bias": 0.6053942137953616,
         "n_samples": 152896.0
       },
       "pequeno": {
-        "bias": 3.5322493028099404,
+        "bias": 2.58904621785034,
         "n_samples": 7178.0
       },
       "moderado": {
-        "bias": 6.260370702758911,
+        "bias": 5.185665752874236,
         "n_samples": 4078.0
       },
       "grande": {
-        "bias": -3.273489789285079,
+        "bias": -1.447239637345147,
         "n_samples": 1008.0
       },
       "extremo": {
-        "bias": -54.89660116009417,
+        "bias": -50.227050352865824,
         "n_samples": 58.0
       }
     },
     "peak_diagnostics": {
       "peak_real_mgd": 135.1509063026402,
-      "peak_pred_mgd": 85.92522299559995,
-      "peak_error_mgd": -49.225683307040256,
-      "peak_error_pct": -36.42275486988623,
-      "max_pred_mgd": 85.92522299559995,
+      "peak_pred_mgd": 129.26569605599724,
+      "peak_error_mgd": -5.88521024664297,
+      "peak_error_pct": -4.3545473779246135,
+      "max_pred_mgd": 129.26569605599724,
       "max_real_mgd": 135.1509063026402
     },
     "top_10_peak_pred_real_ratios": [
@@ -84,22 +84,22 @@
         "rank": 1,
         "sample_index": 6112,
         "real_mgd": 135.1509063026402,
-        "pred_mgd": 22.37545528042967,
-        "pred_real_ratio": 0.1655590472351317
+        "pred_mgd": 32.857876846542005,
+        "pred_real_ratio": 0.24311991495613167
       },
       {
         "rank": 2,
         "sample_index": 6113,
         "real_mgd": 133.1767819668825,
-        "pred_mgd": 24.41091925510048,
-        "pred_real_ratio": 0.183297110011044
+        "pred_mgd": 33.48493886752514,
+        "pred_real_ratio": 0.2514322569819411
       },
       {
         "rank": 3,
         "sample_index": 117606,
         "real_mgd": 104.86029124893709,
-        "pred_mgd": 25.69833131943441,
-        "pred_real_ratio": 0.24507209557931586
+        "pred_mgd": 31.8181680776055,
+        "pred_real_ratio": 0.303433909048274
       },
       {
         "rank": 4,
@@ -119,46 +119,46 @@
         "rank": 6,
         "sample_index": 117608,
         "real_mgd": 104.17618492740274,
-        "pred_mgd": 23.41509504442184,
-        "pred_real_ratio": 0.22476437451360995
+        "pred_mgd": 17.39362754990671,
+        "pred_real_ratio": 0.1669635681324653
       },
       {
         "rank": 7,
         "sample_index": 117607,
         "real_mgd": 103.07530622020376,
-        "pred_mgd": 24.022626191545093,
-        "pred_real_ratio": 0.23305898446932216
+        "pred_mgd": 21.38005289019563,
+        "pred_real_ratio": 0.2074216771621381
       },
       {
         "rank": 8,
         "sample_index": 99290,
         "real_mgd": 97.90431773833599,
-        "pred_mgd": 27.089910699494794,
-        "pred_real_ratio": 0.2766978140013871
+        "pred_mgd": 18.15059350765053,
+        "pred_real_ratio": 0.18539114440448604
       },
       {
         "rank": 9,
         "sample_index": 6114,
         "real_mgd": 93.51671278839406,
-        "pred_mgd": 26.619625919314654,
-        "pred_real_ratio": 0.2846510011483027
+        "pred_mgd": 20.89748972091295,
+        "pred_real_ratio": 0.2234626207210573
       },
       {
         "rank": 10,
         "sample_index": 111198,
         "real_mgd": 91.3521029405823,
-        "pred_mgd": 1.8142334222943048,
-        "pred_real_ratio": 0.01985978826863272
+        "pred_mgd": 0.22378633254212915,
+        "pred_real_ratio": 0.002449711887723979
       }
     ]
   },
   "residual_diagnostics": {
-    "mean": 0.9273577515277442,
+    "mean": 0.7742599833522762,
     "median": 0.22378633254212915,
-    "std": 2.895172479477527,
-    "pct_overestimation_gt_2_mgd": 10.446198356111319,
-    "pct_underestimation_gt_2_mgd": 0.4388141727898897,
-    "corr_real_magnitude_vs_residual": -0.2241530987432813
+    "std": 2.5485633917512795,
+    "pct_overestimation_gt_2_mgd": 8.48999503686039,
+    "pct_underestimation_gt_2_mgd": 0.4593930443414156,
+    "corr_real_magnitude_vs_residual": -0.21119270030259452
   },
   "normalization_diagnostics": {
     "effective_target_range_norm": {
