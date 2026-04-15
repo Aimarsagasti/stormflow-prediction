@@ -189,11 +189,24 @@ class TwoStageLoss(nn.Module):
             reg_pred = reg_value[event_mask]  # Selecciona predicciones de magnitud solo en eventos
             reg_true = y_true[event_mask]  # Selecciona targets normalizados solo en eventos
             reg_weights = sample_weights[event_mask]  # Selecciona pesos por muestra solo en eventos
+            reg_true_real = y_true_real[event_mask]  # Recupera la magnitud real en MGD solo para eventos para decidir severidad fisica
+            reg_pred_real = self._denormalize_target(reg_pred)  # Desnormaliza la prediccion del regresor para medir exceso relativo en unidades interpretable
             huber_values = self.huber_base(reg_pred, reg_true)  # Calcula error Huber por muestra para regresion
-            under_mask = reg_pred < reg_true  # Detecta infraestimaciones para penalizarlas mas fuerte
-            huber_values = torch.where(under_mask, huber_values * 3.0, huber_values)  # Amplifica errores por infraestimacion
-            
-            reg_loss = (huber_values * reg_weights).mean()  # Pondera por sample_weights y promedia sobre eventos
+            under_mask = reg_pred_real < reg_true_real  # Detecta infraestimaciones en espacio real para respetar la interpretacion hidrologica
+            over_mask = reg_pred_real > reg_true_real  # Detecta sobreestimaciones reales para poder castigar solo los excesos grandes
+            under_factor = torch.ones_like(reg_true_real)  # Empieza con perdida simetrica en eventos leves donde ir por arriba no debe incentivarse
+            under_factor = torch.where(reg_true_real >= 5.0, torch.full_like(reg_true_real, 1.5), under_factor)  # Sube a 1.5x en eventos moderados para mantener prioridad de capturar picos
+            under_factor = torch.where(reg_true_real >= 20.0, torch.full_like(reg_true_real, 2.5), under_factor)  # Sube a 2.5x en eventos altos donde una infraestimacion ya es operativamente seria
+            under_factor = torch.where(reg_true_real >= 50.0, torch.full_like(reg_true_real, 3.5), under_factor)  # Sube a 3.5x en extremos raros donde perder magnitud es el peor error
+            safe_true_real = torch.clamp(reg_true_real, min=1e-6)  # Protege la division del ratio relativo aunque aqui ya estemos en eventos positivos
+            over_ratio = torch.relu((reg_pred_real - reg_true_real) / safe_true_real)  # Mide cuanto se excede la prediccion respecto al valor real en terminos porcentuales
+            excess_over_ratio = torch.relu(over_ratio - 0.25)  # Deja un margen del 25% para overshoot pequeno y activa castigo extra solo en excesos claros
+            over_factor = 1.0 + torch.clamp(1.6 * excess_over_ratio, max=1.5)  # Hace costoso el overshoot del 50-100% observado en scatter sin volverlo peor que infraestimar extremos
+            significant_over_mask = over_mask & (reg_true_real > 5.0)  # Limita la correccion de sesgo a eventos moderados o mayores donde aparecieron los disparos graves
+            reg_factor = torch.ones_like(huber_values)  # Crea tensor base de multiplicadores para combinar ambas reglas sin alterar la Huber base
+            reg_factor = torch.where(under_mask, under_factor, reg_factor)  # Aplica penalizacion gradual solo cuando la prediccion queda por debajo del real
+            reg_factor = torch.where(significant_over_mask, over_factor, reg_factor)  # Aplica penalizacion adicional solo a sobreestimaciones excesivas en eventos significativos
+            reg_loss = (huber_values * reg_factor * reg_weights).mean()  # Combina Huber, asimetria calibrada y pesos por muestra en una sola media
         else:  # Si no hay eventos en el batch, no se puede entrenar el regresor
             reg_loss = torch.zeros((), device=y_true.device, dtype=y_true.dtype)  # Usa cero escalar para no afectar el total
 
