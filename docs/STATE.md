@@ -1,6 +1,6 @@
 # STATE.md - Estado actual del proyecto
 
-**Última actualización:** 2026-04-17
+**Última actualización:** 2026-04-17 (corrección de cifras SIN SF tras verificar contra `local_eval_metrics.json`)
 **Mantenido por:** Aimar (actualizar al final de cada sesión de trabajo significativa).
 
 ---
@@ -61,9 +61,9 @@ Generado por `evaluate_local.py`. Fuente autoritativa: `outputs/data_analysis/lo
 
 | Horizonte | Min  | NSE     | RMSE | MAE  | Error Pico | Bias Base | Bias Extremo |
 |-----------|------|---------|------|------|------------|-----------|--------------|
-| H=1       | 5m   | 0.819   | 1.02 | 0.31 | +12.8%     | +0.22     | -3.7         |
-| H=3       | 15m  | 0.536   | 1.64 | 0.39 | -48.2%     | +0.26     | -25.8        |
-| H=6       | 30m  | -0.447  | 2.89 | 0.81 | -92.6%     | +0.53     | -53.3        |
+| H=1       | 5m   | 0.861   | 0.89 | 0.29 | -21.0%     | +0.21     | -12.7        |
+| H=3       | 15m  | 0.471   | 1.74 | 0.38 | -52.1%     | +0.25     | -15.9        |
+| H=6       | 30m  | -1.212  | 3.57 | 1.21 | -78.2%     | +0.94     | -50.5        |
 
 ### Comparación global: CON stormflow como feature (autoregresivo)
 
@@ -77,11 +77,11 @@ Generado por `evaluate_local.py`. Fuente autoritativa: `outputs/data_analysis/lo
 
 | Rango MGD          | Muestras | MAPE    | NSE      |
 |---------------------|----------|---------|----------|
-| Base (<0.5)        | 152,896  | 183.2%  | -115.9   |
-| Leve (0.5-5)       | 9,520    | 65.4%   | -2.58    |
-| Moderado (5-20)    | 2,303    | 34.4%   | -1.09    |
-| Alto (20-50)       | 440      | 31.5%   | -4.14    |
-| Extremo (>50)      | 59       | 44.3%   | -3.23    |
+| Base (<0.5)        | 152,904  | 73,606% | -14.51   |
+| Leve (0.5-5)       | 9,518    | 59.8%   | -0.26    |
+| Moderado (5-20)    | 2,305    | 25.8%   | +0.19    |
+| Alto (20-50)       | 437      | 19.9%   | +0.02    |
+| Extremo (>50)      | 59       | 30.3%   | -0.99    |
 
 ### Diagnóstico por rangos de magnitud (H=1 CON SF)
 
@@ -101,10 +101,10 @@ Reentrenamiento del mismo modelo H1_sinSF con ligeros ajustes. Captura ligeramen
 
 ## Qué funciona
 
-- **Eventos moderados (5-20 MGD) a H=1:** MAPE 17-34% (modelo con SF), NSE positivo. Operativamente útil.
-- **Eventos leves (0.5-5 MGD) a H=1 con SF:** MAPE 32%, NSE=0.41.
-- **Predicción base (flujo sin tormenta):** sesgo pequeño y estable.
-- **Timing del pico:** el modelo acierta bastante bien CUÁNDO ocurre el pico (a H=1).
+- **Eventos moderados (5-20 MGD) a H=1 SIN SF:** MAPE 25.8%, NSE=0.19 (modesto pero positivo). Con SF sube a NSE=0.52.
+- **Eventos leves (0.5-5 MGD) a H=1 CON SF:** MAPE 32%, NSE=0.41. Sin SF el NSE es negativo (-0.26).
+- **Predicción base (flujo sin tormenta):** sesgo pequeño y estable (bias ≈ +0.21 MGD).
+- **Timing del pico:** el modelo acierta bastante bien CUÁNDO ocurre el pico a H=1.
 
 ---
 
