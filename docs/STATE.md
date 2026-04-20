@@ -1,6 +1,6 @@
 # STATE.md - Estado actual del proyecto
 
-**Última actualización:** 2026-04-17 (corrección de cifras SIN SF tras verificar contra `local_eval_metrics.json`)
+**Última actualización:** 2026-04-20 (añadidos hallazgos del análisis del dataset)
 **Mantenido por:** Aimar (actualizar al final de cada sesión de trabajo significativa).
 
 ---
@@ -129,6 +129,54 @@ Reentrenamiento del mismo modelo H1_sinSF con ligeros ajustes. Captura ligeramen
 - 92% de las muestras son base (<0.5 MGD).
 - NSE y RMSE globales están dominados por el régimen donde el modelo funciona bien.
 - Las métricas por rangos son más informativas para el caso operativo.
+
+---
+
+
+## Hallazgos del análisis del dataset (2026-04-20)
+
+Generado por `scripts/generate_dataset_stats.py`. Documento completo: `docs/DATASET_STATS.md`. Números brutos: `outputs/data_analysis/dataset_stats.json`.
+
+### [ALTA] El modelo apenas bate al predictor naive
+
+Un predictor trivial `y_pred(t+h) = y(t)` (persistencia) obtiene sobre test:
+
+| Horizonte | NSE naive | NSE modelo SIN SF | Ganancia |
+|-----------|----------:|------------------:|---------:|
+| H=1       | ~0.826    | 0.861             | +0.035   |
+| H=3       | ~0.512    | 0.471             | -0.041   |
+| H=6       | ~0.309    | -1.212            | -1.521   |
+
+El modelo mejora marginalmente al naive a H=1 y es peor a H≥3. Un script de una línea (`y_pred = y_last`) supera a la TCN a H=3.
+
+**Implicación:** todas las métricas reportadas deben incluir el baseline naive como referencia. Reportar NSE=0.861 a H=1 sin contextualizar es engañoso.
+
+### [ALTA] Asimetría de extremos entre splits
+
+| Split | n extremos (>50 MGD) | Max MGD |
+|-------|---------------------:|--------:|
+| train | 677                  | 199.4   |
+| val   | 97                   | **225.3** (máximo absoluto del dataset) |
+| test  | 59                   | 135.2   |
+
+El modelo se evalúa en test sobre un régimen menos extremo que el de entrenamiento, mientras que val incluye el pico absoluto. El early stopping sobre val puede estar favoreciendo infraestimación de picos grandes.
+
+### [MEDIA] Redundancia masiva entre features
+
+36 pares de features con |Pearson| ≥ 0.7 sobre 22 features totales. Casos más extremos:
+- `rain_sum_10m` vs `rain_max_10m`: 0.985
+- `rain_sum_10m` vs `rain_sum_15m`: 0.970
+- `api_dynamic` correlaciona >0.7 con 9 features distintas
+
+Número efectivo de dimensiones independientes entre las 22 features: probablemente ~8-10.
+
+### [MEDIA] ACF del target limita predictibilidad a H>1
+
+ACF(5 min) = 0.909. ACF(30 min) = 0.556. La ACF decae rápido tras los primeros 30 minutos. Sin incorporar predicción de lluvia externa (opción c), extender horizonte útil más allá de ~15 min tiene límite físico.
+
+### [MEDIA] Tamaño muestral insuficiente para bucket Extremo
+
+Solo 59 muestras extremas en test. Las métricas sobre ese bucket (NSE=-0.99, bias=-12.7 MGD) tienen alta varianza. Un único evento atípico puede desplazarlas.
 
 ---
 
