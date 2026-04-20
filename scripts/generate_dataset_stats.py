@@ -893,10 +893,11 @@ def compute_section_6_target_autocorrelation(
     if acf_at_5min is not None and acf_at_30min is not None:
         md_lines.append(
             f"> **Lectura:** ACF a 5 minutos = {acf_at_5min:.3f}, ACF a 30 minutos = {acf_at_30min:.3f}. "
-            f"Esto da una referencia cuantitativa del limite teorico de un predictor naive "
-            f"(persistencia): su NSE a H=1 estaria proximo a {acf_at_5min**2:.3f} y a H=6 "
-            f"proximo a {acf_at_30min**2:.3f}, lo que contextualiza los NSE del modelo actual "
-            f"(0.861 a H=1, -1.21 a H=6) en la tabla del STATE.md."
+            f"Como aproximacion teorica, el NSE de un predictor AR(1) de persistencia estaria acotado "
+            f"inferiormente por 2*rho - 1 = {2*acf_at_5min - 1:.3f} a H=1 y {2*acf_at_30min - 1:.3f} a H=6. "
+            f"El valor empirico exacto sobre test, calculado en la seccion 8 de este documento, "
+            f"es **NSE naive = 0.811 a H=1**. La cifra empirica de la seccion 8 es la autoritativa; "
+            f"las aproximaciones aqui sirven solo para contextualizar como decae la senal en la serie."
         )
     md_lines.append("")
 

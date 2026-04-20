@@ -2,7 +2,7 @@
 
 Documento generado automaticamente por `scripts/generate_dataset_stats.py`.
 
-- **Fecha de generacion:** 2026-04-20 11:48:31
+- **Fecha de generacion:** 2026-04-20 14:45:12
 - **Config usada:** `C:\Dev\TFM\configs\local.yaml`
 - **Proposito:** input para la revision externa con Opus 4.7 sobre metodologia y limite fisico del modelo.
 
@@ -187,7 +187,7 @@ La funcion de autocorrelacion (ACF) mide cuanto se parece la serie a si misma de
 | 144 | 720 | 0.0937 |
 | 288 | 1440 | 0.0431 |
 
-> **Lectura:** ACF a 5 minutos = 0.909, ACF a 30 minutos = 0.556. Esto da una referencia cuantitativa del limite teorico de un predictor naive (persistencia): su NSE a H=1 estaria proximo a 0.826 y a H=6 proximo a 0.309, lo que contextualiza los NSE del modelo actual (0.861 a H=1, -1.21 a H=6) en la tabla del STATE.md.
+> **Lectura:** ACF a 5 minutos = 0.909, ACF a 30 minutos = 0.556. Como aproximacion teorica, el NSE de un predictor AR(1) de persistencia estaria acotado inferiormente por 2*rho - 1 = 0.817 a H=1 y 0.112 a H=6. El valor empirico exacto sobre test, calculado en la seccion 8 de este documento, es **NSE naive = 0.811 a H=1**. La cifra empirica de la seccion 8 es la autoritativa; las aproximaciones aqui sirven solo para contextualizar como decae la senal en la serie.
 
 ![ACF del target](../outputs/figures/dataset_stats/section6_target_acf.png)
 
