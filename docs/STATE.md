@@ -1,6 +1,6 @@
 # STATE.md - Estado actual del proyecto
 
-**Última actualización:** 2026-04-20 (añadidos hallazgos del análisis del dataset)
+**Última actualización:** 2026-04-20 (añadidos hallazgos de revisión con Opus 4.7)
 **Mantenido por:** Aimar (actualizar al final de cada sesión de trabajo significativa).
 
 ---
@@ -180,24 +180,97 @@ Solo 59 muestras extremas en test. Las métricas sobre ese bucket (NSE=-0.99, bi
 
 ---
 
+### Hallazgos adicionales de revisión externa con Opus 4.7 (2026-04-20)
+
+Revisión completa archivada en `docs/OPUS_REVIEW_2026-04-20.md`. Los hallazgos que se añaden a los de sección anterior son:
+
+#### [ALTO] Inconsistencia train/inference del regresor en TwoStageTCN
+
+`src/models/loss.py:182-188` entrena el regresor solo en muestras con `y_true_real > 0.5 MGD` (~10% del batch). Durante inferencia, el switch duro con threshold=0.3 ejecuta el regresor también en muestras que el clasificador marca como evento por falso positivo. El regresor nunca ha visto esas regiones, produce salida OOD, y contamina el bucket Base (bias=+0.21 MGD no es ruido, es firma OOD).
+
+**Acción pendiente:** entrenar el regresor en TODAS las muestras manteniendo los pesos por magnitud. Mantener switch duro en inferencia.
+
+#### [MODERADO] `delta_flow_5m` y `delta_flow_15m` son puerta trasera al atajo de flow_total_mgd
+
+Como `flow_total ≈ baseflow + stormflow` y baseflow varía lento, `delta_flow[t] ≈ delta_stormflow[t]`. Estas features transportan de facto la derivada del target en t, reintroduciendo el atajo que se cerró en iter 11 al quitar `flow_total_mgd`.
+
+**Hipótesis a verificar empíricamente:** si al eliminar estas dos features el NSE cae al nivel del naive (~0.82), el modelo está haciendo AR(1) disfrazado en lugar de aprender lluvia→stormflow.
+
+#### [ALTO] Pregunta crítica sin verificar: ¿la ganancia sobre naive viene de los delta_flow o de la lluvia?
+
+La ganancia del modelo sobre naive es solo +0.050 NSE a H=1. Si esa ganancia proviene de `delta_flow_*`, el aparato de TwoStageTCN + 22 features es teatro sobre un AR(1). Si proviene de la lluvia, el modelo sí aprende hidrología pero marginalmente.
+
+**Esta es la pregunta que decide la dirección del proyecto.** Se responde con el ablation de la iteración 16.
+
+#### [PENDIENTE DE VERIFICAR] Afirmación sin medición: "el modelo acierta cuándo ocurre el pico"
+
+Actualmente se afirma en la sección "Qué funciona" sin métrica asociada. Hace falta implementar `peak_lag_minutes` en `evaluate_local.py` para cuantificar el error de timing separado del error de magnitud.
+
+#### [PENDIENTE DE VERIFICAR] Afirmación sin evidencia: "15 extremos sin lluvia son físicamente impredecibles"
+
+Esta defensa es usada para justificar el error en bucket Extremo pero no se ha cruzado con `temp_daily_f` ni con `rain_sum_*` de 24-72h previas. Si los eventos se concentran en enero-marzo con temperaturas bajas + nieve acumulada, son predecibles con las features actuales y la afirmación es falsa.
+
+**Acción pendiente:** análisis cruzado que genere `docs/EXTREME_EVENTS_ANALYSIS.md`.
+
+#### Cotas de NSE alcanzable (derivadas del análisis de Opus)
+
+Descomposición del denominador de NSE por bucket sobre test:
+
+- Bucket Extremo contribuye ~18% del denominador.
+- Bucket Alto contribuye ~24%.
+- Buckets Moderado+Leve contribuyen ~32%.
+- Bucket Base contribuye ~26%.
+
+Cota superior estimada a H=1 con features actuales: **NSE alcanzable 0.88-0.92** (predicción perfecta de extremos con lluvia + mejora moderada del resto). Cota para peak_err_pct en bucket Extremo filtrado a los 44 con lluvia: **-5% con regresor óptimo**. Por encima de 0.92 se requieren señales externas (radar de lluvia futura, saturación del suelo, deshielo explícito).
+
 ## Siguientes pasos priorizados
 
 **Prioridad actual:** mejorar el modelo. El TFM se redactará después (margen hasta septiembre 2026).
 
-### 1. Decidir siguiente experimento
-No definido aún. Opciones sobre la mesa:
+Plan de iteraciones tras la revisión con Opus 4.7 (2026-04-20). Cada iteración es independiente en atribución: se ejecutan y evalúan por separado para saber qué aportó cada cambio.
 
-**a) Probar `api_dynamic` reformulado con evapotranspiración.** La feature actual es redundante con `rain_sum_60m` (r=0.94). Podría ser útil si se reformula como índice de saturación del suelo incorporando evapotranspiración real.
+### Iteración 16 — Ablation de `delta_flow_*` [INMEDIATA]
 
-**b) Modelo multi-cabeza con clasificación de niveles (5 niveles: Normal/Leve/Moderado/Alto/Severo).** Cross-entropy en vez de MSE. Operativamente puede ser más útil que predecir MGD exactos.
+Eliminar `delta_flow_5m` y `delta_flow_15m` de `FEATURE_COLUMNS` en `claude_train.py` (pasa de 22 a 20 features). Reentrenar `modelo_H1_sinSF`. Evaluar con `evaluate_local.py`.
 
-**c) Integrar modelo de predicción de lluvia del MSD.** Los jefes mencionaron que tienen uno. Usar lluvia predicha como input extendería el horizonte efectivo. PENDIENTE de reunión con el jefe para detalles (formato, resolución, precisión).
+**Responde:** ¿la ganancia de +0.050 NSE sobre el naive viene de estas features o de la lluvia?
 
-**d) Cerrar el modelo aquí y empezar análisis por severidad + valor operativo.** Defensa académicamente sólida: el modelo funciona bien donde importa operativamente (moderados a H=1), los extremos sin lluvia son una limitación de los datos no del modelo.
+**Decide:** si NSE cae a 0.81-0.82 (nivel naive), el proyecto cambia de enfoque radical. Si cae a 0.84-0.85, seguir con iteración 17. Si se mantiene o mejora, las features eran redundantes/dañinas y seguimos.
 
-### 2. Decisiones pendientes (no bloqueantes)
-- Sistema de alerta por niveles: pendiente de decisión tras ver si se implementa la opción (b).
-- Reunión con el jefe sobre modelo de lluvia (opción c).
+### Iteración 17 — Regresor no-condicional en TwoStageLoss
+
+Modificar `src/models/loss.py` para que el regresor se entrene sobre TODAS las muestras, no solo las de evento. Mantener switch duro en inferencia. Mantener los pesos por magnitud.
+
+**Responde:** ¿el bias del bucket Base (+0.21 MGD) es OOD del regresor o ruido real?
+
+**Decide:** si bias_base baja claramente (≤+0.05) y NSE no empeora, la hipótesis A2 de Opus es correcta. Si empeora, se revierte.
+
+### Iteración 18 — Añadir `peak_lag_minutes` a evaluación
+
+No es reentrenamiento. Añadir métrica de error de timing a `evaluate_local.py` y re-evaluar el mejor modelo que tengamos a estas alturas.
+
+**Responde:** ¿el modelo realmente acierta "cuándo" ocurre el pico, o es una afirmación sin verificar?
+
+### Análisis paralelo — Los 15 extremos sin lluvia (D3 de Opus)
+
+Notebook local (no Colab, no GPU). Cruzar los 15 eventos sin lluvia con `temp_daily_f` y acumulados de 24-72h previas. Generar `docs/EXTREME_EVENTS_ANALYSIS.md`.
+
+**Responde:** ¿son realmente "físicamente impredecibles" o tienen patrón (deshielo, temperaturas bajas precedidas de nieve)?
+
+### Iteración 19 — Cambio de split a años completos
+
+Modificar `src/pipeline/split.py` para cortar en años calendario (8 train / 1 val / 1.5 test) en lugar de 70/15/15 por filas. Reentrenar con el mejor modelo disponible.
+
+**Responde:** ¿la evaluación actual sobre-estima o sub-estima el rendimiento real?
+
+### Iteración 20 — Reducción de features por permutation importance
+
+Con el modelo ya limpio (iteraciones 16-17 aplicadas), calcular PI de forma fiable. Eliminar redundancias según `DATASET_STATS.md` sección 5. Objetivo: 10 features sin perder NSE.
+
+### Condiciones de parada y bloqueos
+
+- Si iteración 16 revela NSE=0.82, se detiene la secuencia y se reevalúa todo.
+- Opción (c) original (modelo de lluvia externo del MSD) sigue bloqueada esperando reunión con el jefe. Si se desbloquea, salta al primer puesto.
 
 ---
 
