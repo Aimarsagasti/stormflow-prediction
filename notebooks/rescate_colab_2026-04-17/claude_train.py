@@ -53,7 +53,6 @@ yaml_path = f'{PROJECT_DIR}/configs/default.yaml'
 with open(yaml_path, 'r') as f:
     content = f.read()
 
-# Reemplazar rutas de datos
 content = content.replace(
     "/content/drive/MyDrive/Proyecto de capstone/Archivos del proyecto/Largos/MC-CL-005/1parte/",
     "/content/drive/.shortcut-targets-by-id/1xGRwVQHSkN11f9PxxArnsSTGyCyXuGym/MC-CL-005/1parte/"
@@ -72,6 +71,42 @@ with open(yaml_path, 'w') as f:
 
 print('✓ Rutas actualizadas en default.yaml')
 
+# ═══════════════════════════════════════════════════════════════
+# CONFIGURACIÓN DE LA ITERACIÓN
+# ═══════════════════════════════════════════════════════════════
+# ÚNICO LUGAR donde se define qué modelo entrenar y con qué features.
+# Al cambiar de iteración, solo hay que tocar este bloque.
+
+ITERATION_NAME = 'iter16'
+# Nombre con el que se guardarán los pesos en Drive.
+MODEL_NAME = f'modelo_H1_sinSF_{ITERATION_NAME}'
+
+# Lista de features de esta iteración.
+# Iteración 16: ablation de delta_flow_5m y delta_flow_15m.
+# Hipótesis (Opus 4.7, DATASET_STATS.md §5 y §8):
+#   delta_flow[t] ≈ delta_stormflow[t] porque baseflow varía lento,
+#   reintroduciendo por puerta trasera el atajo de flow_total_mgd
+#   cerrado en iter 11. Si al quitarlas el NSE cae al nivel del
+#   naive (~0.82), el modelo está haciendo AR(1) disfrazado.
+FEATURE_COLUMNS = [
+    'rain_in',
+    'temp_daily_f', 'api_dynamic',
+    'rain_sum_10m', 'rain_sum_15m', 'rain_sum_30m',
+    'rain_sum_60m', 'rain_sum_120m', 'rain_sum_180m', 'rain_sum_360m',
+    'rain_max_10m', 'rain_max_30m', 'rain_max_60m',
+    'minutes_since_last_rain',
+    # delta_flow_5m y delta_flow_15m eliminadas en iter16.
+    'delta_rain_10m', 'delta_rain_30m',
+    'hour_sin', 'hour_cos', 'month_sin', 'month_cos',
+]
+
+TARGET_COL = 'stormflow_mgd'
+AUX_COL    = 'is_event'
+
+print(f'[iter] Iteración:  {ITERATION_NAME}')
+print(f'[iter] Modelo:     {MODEL_NAME}')
+print(f'[iter] Features:   {len(FEATURE_COLUMNS)}')
+
 """## 1. Imports"""
 
 import torch
@@ -84,8 +119,8 @@ from src.features.engineering import create_features
 from src.pipeline.split import split_chronological
 from src.pipeline.normalize import normalize_splits
 from src.pipeline.sequences import create_dataloaders
-from src.models.tcn import StormflowTCN, TwoStageTCN          # NUEVO: TwoStageTCN
-from src.models.loss import CompositeLoss, TwoStageLoss         # NUEVO: TwoStageLoss
+from src.models.tcn import StormflowTCN, TwoStageTCN
+from src.models.loss import CompositeLoss, TwoStageLoss
 from src.training.trainer import train_model, predict
 from src.evaluation.metrics import evaluate_model
 
@@ -109,16 +144,12 @@ df_feat = create_features(df_clean)
 # ═══════════════════════════════════════════════════════════════
 # REDUCIR CONSUMO DE RAM: convertir float64 a float32
 # ═══════════════════════════════════════════════════════════════
-# Pandas usa float64 por defecto (8 bytes por número).
-# float32 (4 bytes) es suficiente para deep learning y ahorra ~50% RAM.
 import gc
 
-# Eliminar DataFrames intermedios que ya no necesitamos
 for var_name in ['df_timeseries', 'df_events', 'df_clean']:
     if var_name in globals():
         del globals()[var_name]
 
-# Convertir df_feat a float32
 cols_numeric = df_feat.select_dtypes(include=['float64']).columns
 df_feat[cols_numeric] = df_feat[cols_numeric].astype('float32')
 
@@ -135,29 +166,11 @@ print(f"df_feat dtypes: {df_feat.dtypes.value_counts().to_dict()}")
 ## 5. Pipeline: Split → Normalización → DataLoaders
 """
 
-# ─── Definir columnas ──────────────────────────────────────
-# ITERACIÓN 13: Restaurar features de iter 11 para aislar efecto Two-Stage
-# flow_total_mgd sigue FUERA (confirmado como atajo en iter 11)
-# Total: 22 features
-FEATURE_COLUMNS = [
-    'rain_in',
-    'temp_daily_f', 'api_dynamic',
-    'rain_sum_10m', 'rain_sum_15m', 'rain_sum_30m',
-    'rain_sum_60m', 'rain_sum_120m', 'rain_sum_180m', 'rain_sum_360m',
-    'rain_max_10m', 'rain_max_30m', 'rain_max_60m',
-    'minutes_since_last_rain',
-    'delta_flow_5m', 'delta_flow_15m',
-    'delta_rain_10m', 'delta_rain_30m',
-    'hour_sin', 'hour_cos', 'month_sin', 'month_cos',
-]
-TARGET_COL = 'stormflow_mgd'
-AUX_COL = 'is_event'
-
-# Verificar que todas las columnas existen en df_feat
+# Verificar que todas las columnas de FEATURE_COLUMNS existen en df_feat
 missing = [c for c in FEATURE_COLUMNS if c not in df_feat.columns]
 if missing:
     raise ValueError(f'Columnas faltantes en df_feat: {missing}')
-print(f'Features: {len(FEATURE_COLUMNS)} columnas')  # Debería ser 22
+print(f'Features: {len(FEATURE_COLUMNS)} columnas')
 print(f'df_feat shape: {df_feat.shape}')
 
 # ─── Split cronológico ─────────────────────────────────────
@@ -188,41 +201,22 @@ print("log1p_columns en norm_params?", 'log1p_columns' in norm_params)
 # ═══════════════════════════════════════════════════════════════════
 # ANÁLISIS 1: Redundancia entre features
 # ═══════════════════════════════════════════════════════════════════
-# OBJETIVO: Ver si las features "irrelevantes" según permutation
-# importance (PI) están altamente correlacionadas con las features
-# "dominantes". Si r > 0.7, la redundancia explica el PI bajo,
-# NO la inutilidad de la feature.
-#
-# LÓGICA: El PI permuta UNA feature y mide cuánto empeora el RMSE.
-# Si otra feature ya cubre la misma información, permutar la primera
-# no cambia nada porque el modelo se apoya en la segunda.
-# Eso NO significa que la primera sea inútil para el PROBLEMA,
-# solo que es redundante para ESTE MODELO con ESTAS features.
-# ═══════════════════════════════════════════════════════════════════
-
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-# --- Features a investigar ---
-# "Sospechosas": las que PI dice que no importan pero tienen
-# justificación física clara
 sospechosas = ['api_dynamic', 'temp_daily_f', 'hour_sin', 'hour_cos',
                'month_sin', 'month_cos', 'delta_rain_10m', 'delta_rain_30m',
                'delta_flow_5m', 'delta_flow_15m']
 
-# "Dominantes": las que PI dice que importan mucho
 dominantes = ['minutes_since_last_rain', 'flow_total_mgd', 'rain_in',
               'rain_sum_60m']
 
-# --- Calcular correlación entre cada sospechosa y cada dominante ---
-# Usamos df_train (sin normalizar) para ver correlaciones en escala real
 print("=" * 70)
 print("CORRELACIÓN ENTRE FEATURES 'IRRELEVANTES' Y FEATURES 'DOMINANTES'")
 print("=" * 70)
 print(f"\n{'Feature sospechosa':<25} | ", end="")
 for d in dominantes:
-    # Recortar nombre para que quepa en la tabla
     print(f"{d[:18]:>18} | ", end="")
 print("Diagnóstico")
 print("-" * 120)
@@ -234,13 +228,13 @@ for feat in sospechosas:
     print(f"{feat:<25} | ", end="")
     correlaciones = []
     for dom in dominantes:
-        # corr() de pandas calcula Pearson por defecto
+        if dom not in df_train.columns:
+            print(f"{'N/A':>18} | ", end="")
+            correlaciones.append(0)
+            continue
         r = df_train[feat].corr(df_train[dom])
         correlaciones.append(abs(r))
-        # Colorear mentalmente: > 0.7 es "alta redundancia"
         print(f"{r:>+18.4f} | ", end="")
-
-    # Diagnóstico automático
     max_corr = max(correlaciones)
     if max_corr > 0.7:
         print(f"⚠️  REDUNDANTE (r={max_corr:.2f})")
@@ -249,66 +243,38 @@ for feat in sospechosas:
     else:
         print(f"✅ NO redundante (r={max_corr:.2f})")
 
-# --- Correlación específica api_dynamic vs minutes_since_last_rain ---
 print("\n" + "=" * 70)
-print("DETALLE: api_dynamic vs minutes_since_last_rain")
+print("DETALLE: api_dynamic vs features dominantes")
 print("=" * 70)
 
 if 'api_dynamic' in df_train.columns:
-    r_api_mslr = df_train['api_dynamic'].corr(df_train['minutes_since_last_rain'])
-    r_api_rain = df_train['api_dynamic'].corr(df_train['rain_in'])
-    r_api_rsum60 = df_train['api_dynamic'].corr(df_train['rain_sum_60m'])
-    r_api_rsum360 = df_train['api_dynamic'].corr(df_train['rain_sum_360m'])
-    r_api_target = df_train['api_dynamic'].corr(df_train['stormflow_mgd'])
+    for col in ['minutes_since_last_rain', 'rain_in', 'rain_sum_60m', 'rain_sum_360m', 'stormflow_mgd']:
+        if col in df_train.columns:
+            r = df_train['api_dynamic'].corr(df_train[col])
+            print(f"  api_dynamic vs {col:<35}: r = {r:+.4f}")
 
-    print(f"  api_dynamic vs minutes_since_last_rain:  r = {r_api_mslr:+.4f}")
-    print(f"  api_dynamic vs rain_in:                  r = {r_api_rain:+.4f}")
-    print(f"  api_dynamic vs rain_sum_60m:             r = {r_api_rsum60:+.4f}")
-    print(f"  api_dynamic vs rain_sum_360m:            r = {r_api_rsum360:+.4f}")
-    print(f"  api_dynamic vs stormflow_mgd (target):   r = {r_api_target:+.4f}")
-
-    print(f"\n  Interpretación:")
-    if abs(r_api_mslr) > 0.6:
-        print(f"  → El API y minutes_since_last_rain son altamente redundantes.")
-        print(f"    El PI bajo del API se explica por redundancia, NO por inutilidad.")
-    else:
-        print(f"  → El API NO es redundante con minutes_since_last_rain.")
-        print(f"    El PI bajo puede indicar que el modelo no aprendió a usarlo.")
-else:
-    print("  [api_dynamic no encontrado en df_train]")
-
-# --- Heatmap de correlaciones entre TODAS las features ---
 print("\n" + "=" * 70)
 print("MAPA DE CORRELACIONES ENTRE TODAS LAS FEATURES")
 print("=" * 70)
 
 fig, ax = plt.subplots(figsize=(16, 14))
-
-# Calcular la matriz de correlación usando solo las 23 features + target
-cols_para_corr = FEATURE_COLUMNS + [TARGET_COL]
+cols_para_corr = [c for c in FEATURE_COLUMNS if c in df_train.columns] + [TARGET_COL]
 corr_matrix = df_train[cols_para_corr].corr()
 
-# Dibujar el heatmap
-# imshow muestra la matriz como imagen, con colores
 im = ax.imshow(corr_matrix.values, cmap='RdBu_r', vmin=-1, vmax=1, aspect='auto')
-
-# Etiquetas en los ejes
 ax.set_xticks(range(len(cols_para_corr)))
 ax.set_yticks(range(len(cols_para_corr)))
 ax.set_xticklabels(cols_para_corr, rotation=45, ha='right', fontsize=8)
 ax.set_yticklabels(cols_para_corr, fontsize=8)
 
-# Añadir los valores numéricos dentro de cada celda
 for i in range(len(cols_para_corr)):
     for j in range(len(cols_para_corr)):
         val = corr_matrix.values[i, j]
-        # Solo mostrar si la correlación es "interesante" (> 0.3)
         if abs(val) > 0.3:
             color = 'white' if abs(val) > 0.6 else 'black'
             ax.text(j, i, f'{val:.2f}', ha='center', va='center',
                     fontsize=6, color=color)
 
-# Barra de color para interpretar
 fig.colorbar(im, ax=ax, shrink=0.8, label='Correlación de Pearson')
 ax.set_title('Mapa de Correlaciones - Features + Target\n'
              '(rojo = correlación positiva, azul = negativa)',
@@ -318,22 +284,11 @@ plt.show()
 
 print("\nInterpretación del heatmap:")
 print("  - Bloques rojos fuera de la diagonal = features redundantes")
-print("  - Si api_dynamic y minutes_since_last_rain tienen r > 0.6,")
-print("    el PI bajo del API se explica por redundancia")
 print("  - Las rain_sum_* probablemente formen un bloque rojo entre ellas")
 
 # ═══════════════════════════════════════════════════════════════════
 # ANÁLISIS 2: Distribución de features tras normalización
 # ═══════════════════════════════════════════════════════════════════
-# OBJETIVO: Ver cómo queda cada feature en escala normalizada.
-# Si una feature queda comprimida en un rango muy estrecho (ej: 95%
-# de los valores entre 0 y 0.01), el modelo tiene muy poco gradiente
-# para aprender de ella, independientemente de su valor físico.
-#
-# Esto es especialmente importante para api_dynamic y temp_daily_f,
-# que son features con justificación física fuerte pero PI bajo.
-# ═══════════════════════════════════════════════════════════════════
-
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -344,22 +299,20 @@ print(f"\n{'Feature':<25} | {'Min':>8} | {'P25':>8} | {'P50':>8} | "
       f"{'P75':>8} | {'P95':>8} | {'Max':>8} | {'% < 0.05':>8} | Diagnóstico")
 print("-" * 130)
 
-# Lista para guardar las que tienen problemas
 features_comprimidas = []
 features_ok = []
 
 for feat in FEATURE_COLUMNS:
+    if feat not in df_train_norm.columns:
+        print(f"{feat:<25} | [NO ENCONTRADA EN df_train_norm]")
+        continue
     vals = df_train_norm[feat].values
-
     p25 = np.percentile(vals, 25)
     p50 = np.percentile(vals, 50)
     p75 = np.percentile(vals, 75)
     p95 = np.percentile(vals, 95)
-    pct_bajo = (vals < 0.05).mean() * 100  # % de valores muy cerca de 0
-
-    # Diagnóstico: si el rango intercuartílico (P75-P25) es muy estrecho
-    # o si la mayoría de valores están comprimidos cerca de 0
-    iqr = p75 - p25  # Rango intercuartílico
+    pct_bajo = (vals < 0.05).mean() * 100
+    iqr = p75 - p25
 
     if iqr < 0.05:
         diag = "⚠️  MUY COMPRIMIDA"
@@ -374,16 +327,12 @@ for feat in FEATURE_COLUMNS:
     print(f"{feat:<25} | {vals.min():>8.4f} | {p25:>8.4f} | {p50:>8.4f} | "
           f"{p75:>8.4f} | {p95:>8.4f} | {vals.max():>8.4f} | {pct_bajo:>7.1f}% | {diag}")
 
-# --- Resumen ---
 print(f"\n{'=' * 80}")
 print(f"RESUMEN:")
 print(f"  Features bien distribuidas ({len(features_ok)}): {features_ok}")
 print(f"  Features comprimidas ({len(features_comprimidas)}): {features_comprimidas}")
 
-# --- Histogramas comparativos de las features "sospechosas" ---
-sospechosas_norm = ['api_dynamic', 'temp_daily_f', 'minutes_since_last_rain',
-                    'rain_in', 'flow_total_mgd']
-# Filtrar las que existen
+sospechosas_norm = ['api_dynamic', 'temp_daily_f', 'minutes_since_last_rain', 'rain_in']
 sospechosas_norm = [f for f in sospechosas_norm if f in df_train_norm.columns]
 
 n_plots = len(sospechosas_norm)
@@ -393,8 +342,6 @@ if n_plots == 1:
 
 for ax, feat in zip(axes, sospechosas_norm):
     vals = df_train_norm[feat].values
-
-    # Histograma con 100 bins para ver la distribución detallada
     ax.hist(vals, bins=100, color='steelblue', edgecolor='white', alpha=0.8)
     ax.axvline(np.median(vals), color='red', ls='--', lw=1.5,
                label=f'Mediana: {np.median(vals):.3f}')
@@ -403,13 +350,11 @@ for ax, feat in zip(axes, sospechosas_norm):
     ax.set_ylabel('Frecuencia')
     ax.legend(fontsize=7)
 
-plt.suptitle('Distribución de Features Normalizadas (train)\n'
-             'Idealmente deberían usar todo el rango [0, 1]',
+plt.suptitle('Distribución de Features Normalizadas (train)',
              fontsize=13, fontweight='bold')
 plt.tight_layout()
 plt.show()
 
-# --- Comparar distribuciones ANTES y DESPUÉS de normalización ---
 print("\n" + "=" * 80)
 print("COMPARACIÓN ANTES/DESPUÉS DE NORMALIZACIÓN (api_dynamic y temp_daily_f)")
 print("=" * 80)
@@ -418,10 +363,8 @@ for feat in ['api_dynamic', 'temp_daily_f']:
     if feat not in df_train.columns or feat not in df_train_norm.columns:
         print(f"\n  {feat}: [NO ENCONTRADO]")
         continue
-
     raw = df_train[feat].values
     norm = df_train_norm[feat].values
-
     print(f"\n  {feat}:")
     print(f"    ANTES  (escala real):      min={raw.min():.4f}, max={raw.max():.4f}, "
           f"mean={raw.mean():.4f}, std={raw.std():.4f}")
@@ -430,56 +373,17 @@ for feat in ['api_dynamic', 'temp_daily_f']:
     print(f"    % valores norm < 0.05:     {(norm < 0.05).mean()*100:.1f}%")
     print(f"    Rango intercuartílico:     {np.percentile(norm, 75) - np.percentile(norm, 25):.4f}")
 
-'''import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import numpy as np
-
-# ─── Correlación de cada feature con el target ────────────
-print("=== CORRELACIÓN DE FEATURES CON STORMFLOW ===\n")
-
-feature_cols = [c for c in df_feat.columns if c not in ['timestamp', 'stormflow_mgd', 'is_event']]
-correlations = {}
-for col in feature_cols:
-    r = df_feat[col].corr(df_feat['stormflow_mgd'])
-    correlations[col] = r
-
-# Ordenar por correlación absoluta
-sorted_corr = sorted(correlations.items(), key=lambda x: abs(x[1]), reverse=True)
-
-for col, r in sorted_corr:
-    print(f"  {col:30s}  r = {r:+.4f}")
-
-# Plot
-fig, ax = plt.subplots(figsize=(10, 8))
-names = [c for c, _ in sorted_corr]
-values = [v for _, v in sorted_corr]
-colors = ['#2ca02c' if v > 0 else '#d62728' for v in values]
-ax.barh(range(len(names)), values, color=colors)
-ax.set_yticks(range(len(names)))
-ax.set_yticklabels(names, fontsize=9)
-ax.set_xlabel('Correlación de Pearson con stormflow_mgd')
-ax.set_title('Correlación de Features con Stormflow', fontweight='bold')
-ax.axvline(0, color='black', lw=0.5)
-ax.invert_yaxis()
-plt.tight_layout()
-plt.savefig(f'{PROJECT_DIR}/outputs/figures/feature_correlations.png', dpi=100)
-plt.show()
-print(f'\n✓ Gráfico guardado')'''
-
 """## 6. Modelo TCN + Loss Compuesta"""
 
-# ─── Crear modelo Two-Stage ───────────────────────────────
 model = TwoStageTCN(n_features=len(FEATURE_COLUMNS))
 model.compute_receptive_field()
 model.count_parameters()
 
-# ─── Crear loss Two-Stage ─────────────────────────────────
 criterion = TwoStageLoss(
-    event_threshold=0.5,    # 0.5 MGD = umbral para definir "evento" en escala real
+    event_threshold=0.5,
     norm_params=norm_params,
-    cls_weight=0.3,         # 30% clasificacion
-    reg_weight=0.7,         # 70% regresion (magnitud es mas importante)
+    cls_weight=0.3,
+    reg_weight=0.7,
 )
 print(f'Loss: TwoStageLoss(event_threshold=0.5 MGD, cls=0.3, reg=0.7)')
 
@@ -491,17 +395,15 @@ config = {
     'max_epochs': 100,
     'min_epochs': 0,
     'grad_clip_max_norm': 1.0,
-    'early_stopping_patience': 5,
+    'early_stopping_patience': 10,
     'early_stopping_min_delta': 1e-5,
 }
 
 history = train_model(model, train_loader, val_loader, criterion, config)
 
-# ─── Verificar qué scheduler tiene trainer.py ─────────────
 import inspect
 from src.training.trainer import train_model
 
-# Buscar qué scheduler se usa en el código
 source = inspect.getsource(train_model)
 for i, line in enumerate(source.split('\n')):
     if 'scheduler' in line.lower() or 'cosine' in line.lower() or 'plateau' in line.lower():
@@ -534,66 +436,45 @@ metrics_test = evaluate_model(
 # ═══════════════════════════════════════════════════════════════
 # ANÁLISIS DE THRESHOLD DEL CLASIFICADOR (Two-Stage)
 # ═══════════════════════════════════════════════════════════════
-# OBJETIVO: Encontrar el threshold óptimo para el clasificador.
-# Hacemos el forward pass manualmente para extraer cls_prob y
-# reg_value por separado, y luego aplicamos el switch duro con
-# diferentes thresholds sin reentrenar.
-# ═══════════════════════════════════════════════════════════════
-
 import numpy as np
 import torch
 from sklearn.metrics import confusion_matrix
 
-# ─── Paso 1: Forward pass manual para extraer ambas cabezas ──
-# predict() ya aplica el switch duro con threshold=0.3 internamente,
-# así que no nos sirve para probar otros thresholds.
-# En su lugar, recorremos el test_loader y extraemos cls_prob y
-# reg_value directamente del dict que devuelve model().
+all_cls_probs = []
+all_reg_values = []
+all_y_real = []
 
-all_cls_probs = []    # probabilidades del clasificador
-all_reg_values = []   # magnitudes del regresor (escala normalizada)
-all_y_real = []       # valores reales (escala normalizada)
-
-model.eval()  # modo evaluación (desactiva dropout)
-with torch.no_grad():  # desactiva cálculo de gradientes (ahorra RAM y GPU)
+model.eval()
+with torch.no_grad():
     for batch in test_loader:
-        # batch[0] = features (X), batch[1] = target (y)
         x_batch = batch[0].to(device)
-        y_batch = batch[1]  # se queda en CPU, no necesita GPU
-
-        # Forward pass: el modelo devuelve dict con 'cls_prob' y 'reg_value'
+        y_batch = batch[1]
         output = model(x_batch)
-        cls_prob = output['cls_prob'].cpu().numpy().squeeze()  # (batch,)
-        reg_value = output['reg_value'].cpu().numpy().squeeze()  # (batch,)
-
+        cls_prob = output['cls_prob'].cpu().numpy().squeeze()
+        reg_value = output['reg_value'].cpu().numpy().squeeze()
         all_cls_probs.append(cls_prob)
         all_reg_values.append(reg_value)
         all_y_real.append(y_batch.numpy().squeeze())
 
-# Concatenar todos los batches en arrays únicos
-cls_probs = np.concatenate(all_cls_probs)        # shape (N,)
-reg_values_norm = np.concatenate(all_reg_values)  # shape (N,)
-y_real_norm = np.concatenate(all_y_real)           # shape (N,)
+cls_probs = np.concatenate(all_cls_probs)
+reg_values_norm = np.concatenate(all_reg_values)
+y_real_norm = np.concatenate(all_y_real)
 
 print(f"Total muestras test: {len(cls_probs):,}")
 
-# ─── Paso 2: Desnormalizar a escala real (MGD) ────────────────
 target_col = norm_params['target_col']
 target_mean = norm_params['mean'][target_col]
 target_std = norm_params['std'][target_col]
 
-# Inverso de z-score y luego inverso de log1p
 y_real_mgd = np.expm1(y_real_norm * target_std + target_mean)
 y_real_mgd = np.clip(y_real_mgd, 0, None)
 
 reg_values_mgd = np.expm1(reg_values_norm * target_std + target_mean)
 reg_values_mgd = np.clip(reg_values_mgd, 0, None)
 
-# Etiquetas reales de evento (mismo umbral que la loss: 0.5 MGD)
 EVENT_THRESHOLD = 0.5
 real_events = (y_real_mgd > EVENT_THRESHOLD).astype(int)
 
-# ─── Paso 3: Barrido de thresholds ───────────────────────────
 thresholds = [0.5, 0.4, 0.3, 0.25, 0.2, 0.15, 0.1, 0.05]
 
 print("=" * 80)
@@ -612,14 +493,7 @@ print("-" * 100)
 results = {}
 
 for thresh in thresholds:
-    # ─── Aplicar switch duro con este threshold ───────────
-    pred_mgd = np.where(
-        cls_probs >= thresh,
-        reg_values_mgd,
-        0.0
-    )
-
-    # ─── Clasificación ────────────────────────────────────
+    pred_mgd = np.where(cls_probs >= thresh, reg_values_mgd, 0.0)
     pred_events = (cls_probs >= thresh).astype(int)
     cm = confusion_matrix(real_events, pred_events)
     tn, fp, fn, tp = cm[0,0], cm[0,1], cm[1,0], cm[1,1]
@@ -632,11 +506,9 @@ for thresh in thresholds:
     fn_gt10 = (fn_real > 10).sum()
     fn_gt50 = (fn_real > 50).sum()
 
-    # ─── Métricas globales ────────────────────────────────
     ss_res = np.sum((y_real_mgd - pred_mgd) ** 2)
     ss_tot = np.sum((y_real_mgd - y_real_mgd.mean()) ** 2)
     nse = 1 - ss_res / ss_tot
-
     rmse = np.sqrt(np.mean((y_real_mgd - pred_mgd) ** 2))
     mae = np.mean(np.abs(y_real_mgd - pred_mgd))
 
@@ -659,7 +531,6 @@ for thresh in thresholds:
           f"{nse:>7.3f} | {rmse:>6.2f} | {mae:>6.2f} | {err_pico_pct:>+8.1f}%"
           f"{marker}")
 
-# ─── Paso 4: Detalle de eventos perdidos ──────────────────────
 print("\n" + "=" * 80)
 print("DETALLE DE EVENTOS PERDIDOS (FN) POR THRESHOLD")
 print("=" * 80)
@@ -667,11 +538,9 @@ print("=" * 80)
 for thresh in [0.3, 0.15, 0.1, 0.05]:
     fn_mask = (real_events == 1) & (cls_probs < thresh)
     fn_real = y_real_mgd[fn_mask]
-
     if len(fn_real) == 0:
         print(f"\n  Threshold {thresh}: 0 eventos perdidos")
         continue
-
     print(f"\n  Threshold {thresh}: {len(fn_real)} eventos perdidos")
     top_fn = np.sort(fn_real)[::-1][:10]
     print(f"  Top 10 mayores perdidos: {[f'{v:.1f}' for v in top_fn]} MGD")
@@ -679,7 +548,6 @@ for thresh in [0.3, 0.15, 0.1, 0.05]:
           f"mediana={np.median(fn_real):.1f}, "
           f"max={fn_real.max():.1f} MGD")
 
-# ─── Paso 5: Probabilidades en eventos extremos ──────────────
 print("\n" + "=" * 80)
 print("PROBABILIDADES DEL CLASIFICADOR EN EVENTOS EXTREMOS")
 print("=" * 80)
@@ -735,18 +603,12 @@ Eventos perdidos = CSO real (alto coste legal y ambiental).
 # ═══════════════════════════════════════════════════════════════
 # DIAGNÓSTICO PROFUNDO: ¿Qué le pasa al modelo en los extremos?
 # ═══════════════════════════════════════════════════════════════
-
 import numpy as np
 
-# ─── DIAGNÓSTICO 1: Regresor vs Clasificador en extremos ─────
-# Pregunta: cuando hay un evento extremo real (>50 MGD), ¿el
-# regresor predice bien pero el clasificador lo anula? ¿O el
-# regresor también falla?
 print("=" * 80)
 print("DIAGNÓSTICO 1: REGRESOR vs CLASIFICADOR EN EVENTOS EXTREMOS")
 print("=" * 80)
 
-# Eventos > 50 MGD
 extreme_mask = y_real_mgd > 50
 if extreme_mask.sum() > 0:
     print(f"\nTotal eventos > 50 MGD: {extreme_mask.sum()}")
@@ -754,27 +616,23 @@ if extreme_mask.sum() > 0:
           f"{'Pred Final':>10} | {'Err Reg':>8} | {'Err Final':>9} | Diagnóstico")
     print("-" * 95)
 
-    # Para cada evento extremo, mostrar qué predice cada cabeza
     extreme_indices = np.where(extreme_mask)[0]
-    # Ordenar de mayor a menor magnitud real
     sorted_idx = extreme_indices[np.argsort(y_real_mgd[extreme_indices])[::-1]]
 
-    n_cls_fail = 0       # clasificador le da prob baja
-    n_reg_fail = 0       # regresor infraestima
-    n_both_fail = 0      # ambos fallan
+    n_cls_fail = 0
+    n_reg_fail = 0
+    n_both_fail = 0
 
     for idx in sorted_idx:
         real = y_real_mgd[idx]
         prob = cls_probs[idx]
         reg = reg_values_mgd[idx]
-        # Predicción final con threshold=0.3
         pred_final = reg if prob >= 0.3 else 0.0
         err_reg = (reg - real) / real * 100
         err_final = (pred_final - real) / real * 100
 
-        # Clasificar el tipo de fallo
         cls_ok = prob >= 0.3
-        reg_ok = abs(err_reg) < 50  # menos de 50% de error
+        reg_ok = abs(err_reg) < 50
         if not cls_ok and not reg_ok:
             diag = "AMBOS FALLAN"
             n_both_fail += 1
@@ -796,35 +654,28 @@ if extreme_mask.sum() > 0:
     print(f"  Ambos fallan:            {n_both_fail}")
     print(f"  Ambos OK:                {extreme_mask.sum() - n_cls_fail - n_reg_fail - n_both_fail}")
 
-# ─── DIAGNÓSTICO 2: ¿Qué features ve el modelo en picos perdidos? ─
 print("\n" + "=" * 80)
 print("DIAGNÓSTICO 2: FEATURES DE ENTRADA EN LOS 5 MAYORES PICOS")
 print("=" * 80)
 print("¿El modelo recibe señal de lluvia fuerte, o las features")
 print("están comprimidas/silenciadas en esos momentos?")
 
-# Reconstruir las secuencias de entrada para los picos más grandes
-# Necesitamos acceder al test set normalizado
 from src.pipeline.normalize import denormalize_target
 
-# Buscar los índices de los 5 mayores picos en y_real_mgd
 top5_pred_indices = np.argsort(y_real_mgd)[-5:][::-1]
 
-# Recorrer el test_loader para encontrar las secuencias correspondientes
 all_features = []
 sample_counter = 0
 for batch in test_loader:
-    x_batch = batch[0]  # (batch_size, seq_len, n_features)
+    x_batch = batch[0]
     batch_size = x_batch.shape[0]
     for i in range(batch_size):
         if sample_counter in top5_pred_indices:
             all_features.append((sample_counter, x_batch[i].numpy()))
         sample_counter += 1
-    # Parar cuando tengamos todos los que necesitamos
     if len(all_features) >= 5:
         break
 
-# Mostrar estadísticas de las features clave en cada pico
 rain_features = ['rain_in', 'rain_sum_10m', 'rain_sum_30m', 'rain_sum_60m',
                  'rain_sum_360m', 'rain_max_10m', 'rain_max_30m']
 
@@ -836,27 +687,20 @@ for sample_idx, features_seq in sorted(all_features, key=lambda x: -y_real_mgd[x
     prob_val = cls_probs[sample_idx]
     reg_val = reg_values_mgd[sample_idx]
     print(f"\n  Pico real: {real_val:.1f} MGD | prob={prob_val:.4f} | reg={reg_val:.1f} MGD")
-
-    # Últimos 6 timesteps (30 min) de features seleccionadas
-    # Encontrar índices de features de lluvia en FEATURE_COLUMNS
     for feat_name in rain_features:
         if feat_name in FEATURE_COLUMNS:
             feat_idx = FEATURE_COLUMNS.index(feat_name)
             last_6 = features_seq[-6:, feat_idx]
             print(f"    {feat_name:>20}: {[f'{v:.4f}' for v in last_6]}")
 
-# ─── DIAGNÓSTICO 3: Distribución de reg_values en todo el test ───
 print("\n" + "=" * 80)
 print("DIAGNÓSTICO 3: CAPACIDAD DEL REGRESOR")
 print("=" * 80)
-print("¿El regresor tiene capacidad para predecir valores altos,")
-print("o está limitado a un rango estrecho?")
 
 print(f"\n  Rango de reg_values (MGD): {reg_values_mgd.min():.2f} - {reg_values_mgd.max():.2f}")
 print(f"  Rango de y_real (MGD):     {y_real_mgd.min():.2f} - {y_real_mgd.max():.2f}")
 print(f"  Ratio max(reg)/max(real):  {reg_values_mgd.max()/y_real_mgd.max():.2f}")
 
-# Percentiles del regresor vs realidad
 for p in [90, 95, 99, 99.5, 99.9, 100]:
     if p == 100:
         reg_p = reg_values_mgd.max()
@@ -867,7 +711,6 @@ for p in [90, 95, 99, 99.5, 99.9, 100]:
     ratio = reg_p / real_p if real_p > 0 else float('inf')
     print(f"  P{p:>5}: reg={reg_p:>8.2f} | real={real_p:>8.2f} | ratio={ratio:.2f}")
 
-# ¿Cuántos valores del regresor superan 50 MGD?
 print(f"\n  Predicciones del regresor > 50 MGD: {(reg_values_mgd > 50).sum()}")
 print(f"  Predicciones del regresor > 100 MGD: {(reg_values_mgd > 100).sum()}")
 print(f"  Valores reales > 50 MGD: {(y_real_mgd > 50).sum()}")
@@ -876,13 +719,10 @@ print(f"  Valores reales > 100 MGD: {(y_real_mgd > 100).sum()}")
 # ═══════════════════════════════════════════════════════════════
 # DIAGNÓSTICO TWO-STAGE: Evaluación del clasificador
 # ═══════════════════════════════════════════════════════════════
-
 from sklearn.metrics import classification_report, confusion_matrix
 
-# Obtener predicciones con metadata (probabilidades del clasificador)
 y_pred_ts, y_real_ts, metadata = predict(model, test_loader, device, return_metadata=True)
 
-# Desnormalizar y_real para obtener valores en MGD
 target_col = norm_params['target_col']
 target_mean = norm_params['mean'][target_col]
 target_std = norm_params['std'][target_col]
@@ -890,16 +730,13 @@ target_std = norm_params['std'][target_col]
 y_real_mgd = np.expm1(y_real_ts * target_std + target_mean)
 y_real_mgd = np.clip(y_real_mgd, 0, None)
 
-# Etiquetas reales de evento (mismo umbral que la loss: 0.5 MGD)
 EVENT_THRESHOLD = 0.5
 real_events = (y_real_mgd > EVENT_THRESHOLD).astype(int)
 
-# Predicciones del clasificador con threshold=0.3 (mismo que predict)
 CLS_THRESHOLD = 0.3
 cls_probs = metadata['event_probabilities']
 pred_events = (cls_probs >= CLS_THRESHOLD).astype(int)
 
-# --- Métricas del clasificador ---
 print("=" * 70)
 print("DIAGNÓSTICO DEL CLASIFICADOR (Two-Stage)")
 print("=" * 70)
@@ -910,7 +747,6 @@ print(f"\nEventos reales en test: {real_events.sum()} / {len(real_events)} "
 print(f"Eventos predichos: {pred_events.sum()} / {len(pred_events)} "
       f"({pred_events.mean()*100:.1f}%)")
 
-# Confusion matrix
 cm = confusion_matrix(real_events, pred_events)
 print(f"\nMatriz de confusión:")
 print(f"  TN (correcto no-evento): {cm[0,0]:,}")
@@ -918,51 +754,46 @@ print(f"  FP (falsa alarma):       {cm[0,1]:,}")
 print(f"  FN (evento perdido):     {cm[1,0]:,}  <-- LO MÁS PELIGROSO")
 print(f"  TP (evento detectado):   {cm[1,1]:,}")
 
-# Tasas
 if real_events.sum() > 0:
-    recall = cm[1,1] / (cm[1,1] + cm[1,0])  # De los eventos reales, cuántos detectó
+    recall = cm[1,1] / (cm[1,1] + cm[1,0])
     print(f"\n  Recall (sensibilidad): {recall*100:.1f}%"
           f"  (de {real_events.sum()} eventos, detectó {cm[1,1]})")
 if pred_events.sum() > 0:
-    precision = cm[1,1] / (cm[1,1] + cm[0,1])  # De los que predijo como evento, cuántos lo eran
+    precision = cm[1,1] / (cm[1,1] + cm[0,1])
     print(f"  Precision: {precision*100:.1f}%"
           f"  (de {pred_events.sum()} predichos, {cm[1,1]} eran reales)")
 
-# Classification report completo
 print(f"\nReporte completo:")
 print(classification_report(real_events, pred_events,
                             target_names=['No evento', 'Evento'],
                             digits=3))
 
-# --- Distribución de probabilidades ---
 print("=" * 70)
 print("DISTRIBUCIÓN DE PROBABILIDADES DEL CLASIFICADOR")
 print("=" * 70)
-print(f"\n  En NO-EVENTOS (debería ser bajo):")
+
 no_event_probs = cls_probs[real_events == 0]
+print(f"\n  En NO-EVENTOS (debería ser bajo):")
 print(f"    Media: {no_event_probs.mean():.4f}")
 print(f"    Mediana: {np.median(no_event_probs):.4f}")
 print(f"    P95: {np.percentile(no_event_probs, 95):.4f}")
 
-print(f"\n  En EVENTOS (debería ser alto):")
 event_probs = cls_probs[real_events == 1]
 if len(event_probs) > 0:
+    print(f"\n  En EVENTOS (debería ser alto):")
     print(f"    Media: {event_probs.mean():.4f}")
     print(f"    Mediana: {np.median(event_probs):.4f}")
     print(f"    P5: {np.percentile(event_probs, 5):.4f}")
     print(f"    % por encima de threshold ({CLS_THRESHOLD}): "
           f"{(event_probs >= CLS_THRESHOLD).mean()*100:.1f}%")
 
-# --- Rendimiento del regresor SOLO en eventos detectados ---
 print("\n" + "=" * 70)
 print("RENDIMIENTO DEL REGRESOR (solo eventos detectados correctamente)")
 print("=" * 70)
 
-# Desnormalizar predicciones
 y_pred_mgd = np.expm1(y_pred_ts * target_std + target_mean)
 y_pred_mgd = np.clip(y_pred_mgd, 0, None)
 
-# Filtrar: eventos reales donde el clasificador acertó (TP)
 tp_mask = (real_events == 1) & (pred_events == 1)
 if tp_mask.sum() > 0:
     tp_real = y_real_mgd[tp_mask]
@@ -977,7 +808,6 @@ if tp_mask.sum() > 0:
     print(f"  Rango real en TP: {tp_real.min():.1f} - {tp_real.max():.1f} MGD")
     print(f"  Rango pred en TP: {tp_pred.min():.1f} - {tp_pred.max():.1f} MGD")
 
-# Eventos perdidos (FN): qué tan grandes eran
 fn_mask = (real_events == 1) & (pred_events == 0)
 if fn_mask.sum() > 0:
     fn_real = y_real_mgd[fn_mask]
@@ -993,7 +823,6 @@ print('=== VALIDATION ===')
 y_pred_val, y_real_val = predict(model, val_loader, device)
 metrics_val = evaluate_model(y_real_val, y_pred_val, norm_params)
 
-# ─── Diagnóstico completo ─────────────────────────────────
 import json
 from src.evaluation.diagnostics import run_full_diagnostics
 
@@ -1007,15 +836,11 @@ diagnostics = run_full_diagnostics(
     target_col=TARGET_COL,
 )
 
-# Guardar para que Codex pueda leerlo desde GitHub
 diag_path = f'{PROJECT_DIR}/outputs/data_analysis/full_diagnostics.json'
 with open(diag_path, 'w') as f:
     json.dump(diagnostics, f, indent=2, default=str)
 print(f'✓ Diagnóstico guardado en {diag_path}')
 
-# ═══════════════════════════════════════════════════════════════════
-# LIMPIEZA DE RAM - Ejecutar antes del análisis 3
-# ═══════════════════════════════════════════════════════════════════
 import gc
 import matplotlib.pyplot as plt
 
@@ -1025,7 +850,6 @@ print("✓ RAM liberada")
 
 from src.evaluation.diagnostics import run_permutation_importance
 
-# ─── Permutation Importance (puede tardar unos minutos) ───
 importance_ranking = run_permutation_importance(
     model=model,
     dataloader=test_loader,
@@ -1034,7 +858,6 @@ importance_ranking = run_permutation_importance(
     norm_params=norm_params,
 )
 
-# Guardar ranking
 import json
 importance_path = f'{PROJECT_DIR}/outputs/data_analysis/permutation_importance.json'
 with open(importance_path, 'w') as f:
@@ -1045,15 +868,10 @@ print(f'✓ Permutation importance guardado')
 
 from src.pipeline.normalize import denormalize_target
 
-# ─── Desnormalizar predicciones de TEST ───────────────────
 y_real_mgd = denormalize_target(y_real_test, norm_params)
 y_pred_mgd = denormalize_target(y_pred_test, norm_params)
 y_pred_mgd = np.clip(y_pred_mgd, 0, None)
 
-# ═══════════════════════════════════════════════════════════
-# PLOT 1: Scatter predicho vs real (TEST)
-# Subsamplea a 50K puntos máximo para no petar Colab
-# ═══════════════════════════════════════════════════════════
 fig, ax = plt.subplots(figsize=(8, 8))
 n_total = len(y_real_mgd)
 if n_total > 50_000:
@@ -1073,10 +891,6 @@ ax.set_aspect('equal')
 plt.tight_layout()
 plt.show()
 
-# ═══════════════════════════════════════════════════════════
-# PLOT 2: Serie temporal — zoom a los 3 mayores picos en test
-# Ventana de ±500 pasos (±42 horas) alrededor de cada pico
-# ═══════════════════════════════════════════════════════════
 top_k = 3
 peak_indices = np.argsort(y_real_mgd)[-top_k:][::-1]
 
@@ -1104,10 +918,6 @@ for rank, peak_idx in enumerate(peak_indices, 1):
     plt.tight_layout()
     plt.show()
 
-# ═══════════════════════════════════════════════════════════
-# PLOT 3: Histograma de residuos (test)
-# Positivo = infraestimación, negativo = sobreestimación
-# ═══════════════════════════════════════════════════════════
 residuos = y_real_mgd - y_pred_mgd
 
 fig, ax = plt.subplots(figsize=(10, 4))
@@ -1136,19 +946,16 @@ print(f'  Max predicho: {y_pred_mgd.max():.2f} MGD')
 
 import json
 
-# ─── Guardar modelo ───────────────────────────────────────
 os.makedirs(f'{PROJECT_DIR}/outputs/models', exist_ok=True)
 torch.save(model.state_dict(), f'{PROJECT_DIR}/outputs/models/tcn_best.pt')
 print('✓ Modelo guardado')
 
-# ─── Guardar métricas ─────────────────────────────────────
 os.makedirs(f'{PROJECT_DIR}/outputs/data_analysis', exist_ok=True)
 with open(f'{PROJECT_DIR}/outputs/data_analysis/test_metrics.json', 'w') as f:
     json.dump(metrics_test, f, indent=2, default=str)
 print('✓ Métricas guardadas')
 
-# ─── Subir a GitHub ───────────────────────────────────────
-!cd {PROJECT_DIR} && git add outputs/ && git commit -m 'Resultados primer entrenamiento' && git push
+!cd {PROJECT_DIR} && git add outputs/ && git commit -m 'Resultados entrenamiento {ITERATION_NAME}' && git push
 print('✓ Resultados subidos a GitHub')
 
 # ═══════════════════════════════════════════════════════════════
@@ -1158,10 +965,8 @@ import gc
 import torch
 import matplotlib.pyplot as plt
 
-# Cerrar todos los gráficos abiertos (consumen mucha RAM)
 plt.close('all')
 
-# Eliminar variables pesadas si existen
 for var_name in ['model', 'criterion', 'y_pred_test', 'y_real_test',
                  'y_pred_val', 'y_real_val', 'y_pred_mgd', 'y_real_mgd',
                  'y_pred_ts', 'y_real_ts', 'metadata', 'diagnostics',
@@ -1172,15 +977,12 @@ for var_name in ['model', 'criterion', 'y_pred_test', 'y_real_test',
     if var_name in globals():
         del globals()[var_name]
 
-# Vaciar caché de GPU
 if torch.cuda.is_available():
     torch.cuda.empty_cache()
 
-# Forzar recolección de basura
 gc.collect()
-gc.collect()  # Dos veces para objetos con referencias circulares
+gc.collect()
 
-# Verificar RAM disponible
 if torch.cuda.is_available():
     free_mem = torch.cuda.mem_get_info()[0] / 1024**3
     total_mem = torch.cuda.mem_get_info()[1] / 1024**3
@@ -1194,22 +996,13 @@ print("Limpieza completada")
 # ═══════════════════════════════════════════════════════════════
 # PIPELINE OPTIMIZADO PARA RAM LIMITADA
 # ═══════════════════════════════════════════════════════════════
+# FEATURE_COLUMNS, TARGET_COL y AUX_COL se definen en la celda de
+# CONFIGURACIÓN DE LA ITERACIÓN al principio del notebook.
+# NO redefinir aquí. Si ves un error "FEATURE_COLUMNS not defined",
+# ejecuta primero la celda de configuración.
+# ═══════════════════════════════════════════════════════════════
 import gc
 import psutil
-
-FEATURE_COLUMNS = [
-    'rain_in',
-    'temp_daily_f', 'api_dynamic',
-    'rain_sum_10m', 'rain_sum_15m', 'rain_sum_30m',
-    'rain_sum_60m', 'rain_sum_120m', 'rain_sum_180m', 'rain_sum_360m',
-    'rain_max_10m', 'rain_max_30m', 'rain_max_60m',
-    'minutes_since_last_rain',
-    'delta_flow_5m', 'delta_flow_15m',
-    'delta_rain_10m', 'delta_rain_30m',
-    'hour_sin', 'hour_cos', 'month_sin', 'month_cos',
-]
-TARGET_COL = 'stormflow_mgd'
-AUX_COL = 'is_event'
 
 # Verificar columnas
 missing = [c for c in FEATURE_COLUMNS if c not in df_feat.columns]
@@ -1272,6 +1065,7 @@ from src.training.trainer import train_model, predict
 from src.pipeline.sequences import create_dataloaders
 
 print(f"\n=== HORIZON = {H} ({H*5} minutos) ===\n")
+print(f"=== MODELO: {MODEL_NAME} ===\n")
 
 # Crear DataLoaders
 train_loader_h, val_loader_h, test_loader_h = create_dataloaders(
@@ -1342,7 +1136,7 @@ base_mask = y_real_mgd < 0.5
 bias_base = np.mean(y_pred_mgd[base_mask] - y_real_mgd[base_mask]) if base_mask.sum() > 0 else float('nan')
 
 print(f"\n{'='*60}")
-print(f"RESULTADO: HORIZON={H} ({H*5} min)")
+print(f"RESULTADO: HORIZON={H} ({H*5} min) — {MODEL_NAME}")
 print(f"{'='*60}")
 print(f"  Best epoch:    {history_h['best_epoch']}")
 print(f"  NSE:           {nse:.3f}")
@@ -1354,50 +1148,51 @@ print(f"  Bias extremo:  {bias_ext:+.1f} MGD")
 print(f"\n  >>> APUNTA ESTOS NUMEROS Y REINICIA RUNTIME <<<")
 
 # ═══════════════════════════════════════════════════════════════
-# GUARDAR PESOS v2 (loss mejorada) en Google Drive
+# GUARDAR PESOS en Google Drive
 # ═══════════════════════════════════════════════════════════════
 import json, os
 
-# Ruta en Drive donde están los otros checkpoints
 SAVE_DIR = '/content/drive/.shortcut-targets-by-id/1xGRwVQHSkN11f9PxxArnsSTGyCyXuGym/MC-CL-005/Pesos 13 04 2026'
 
 # Guardar pesos del modelo
-save_name = f'modelo_H{H}_sinSF_v2'
-torch.save(model_h.state_dict(), f'{SAVE_DIR}/{save_name}_weights.pt')
-print(f'✓ Pesos guardados: {save_name}_weights.pt')
+torch.save(model_h.state_dict(), f'{SAVE_DIR}/{MODEL_NAME}_weights.pt')
+print(f'✓ Pesos guardados: {MODEL_NAME}_weights.pt')
 
-# Guardar norm_params (necesarios para desnormalizar después)
-with open(f'{SAVE_DIR}/{save_name}_norm_params.json', 'w') as f:
+# Guardar norm_params
+with open(f'{SAVE_DIR}/{MODEL_NAME}_norm_params.json', 'w') as f:
     json.dump(norm_params, f, indent=2, default=str)
-print(f'✓ Norm params guardados: {save_name}_norm_params.json')
+print(f'✓ Norm params guardados: {MODEL_NAME}_norm_params.json')
 
 # Guardar metadata
 meta = {
     'horizon': H,
     'variant': 'sinSF',
-    'version': 'v2_gradual_loss',
+    'iteration': ITERATION_NAME,
     'n_features': len(FEATURE_COLUMNS),
     'seq_length': 72,
     'best_epoch': history_h['best_epoch'],
-    'epochs_trained': history_h['epochs_trained'],
+    'epochs_trained': history_h.get('epochs_trained', history_h['best_epoch']),
     'feature_columns': FEATURE_COLUMNS,
-    'loss_changes': 'asimetria gradual por magnitud + penalizacion sobreestimacion excesiva',
+    'nse_test': float(nse),
+    'rmse_test': float(rmse),
+    'peak_err_pct': float(err_pico),
+    'bias_base': float(bias_base),
+    'bias_ext': float(bias_ext),
+    'config': config_h,
 }
-with open(f'{SAVE_DIR}/{save_name}_meta.json', 'w') as f:
+with open(f'{SAVE_DIR}/{MODEL_NAME}_meta.json', 'w') as f:
     json.dump(meta, f, indent=2)
-print(f'✓ Metadata guardada: {save_name}_meta.json')
+print(f'✓ Metadata guardada: {MODEL_NAME}_meta.json')
 
 # ═══════════════════════════════════════════════════════════════
-# PLOTS: Predicho vs Real (sin consumir RAM extra)
+# PLOTS: Predicho vs Real
 # ═══════════════════════════════════════════════════════════════
-
 import matplotlib
 matplotlib.use('module://matplotlib_inline.backend_inline')
 
 import matplotlib.pyplot as plt
 import numpy as np
 
-# ─── PLOT 1: Scatter predicho vs real ─────────────────────────
 fig, ax = plt.subplots(figsize=(8, 8))
 n_total = len(y_real_mgd)
 if n_total > 50000:
@@ -1411,13 +1206,12 @@ max_val = max(y_real_mgd.max(), y_pred_mgd.max())
 ax.plot([0, max_val], [0, max_val], 'k--', lw=1, label='1:1 (perfecto)')
 ax.set_xlabel('Stormflow Real (MGD)')
 ax.set_ylabel('Stormflow Predicho (MGD)')
-ax.set_title(f'Horizon={H} ({H*5}min) — Predicho vs Real', fontsize=14, fontweight='bold')
+ax.set_title(f'{MODEL_NAME} — Predicho vs Real', fontsize=14, fontweight='bold')
 ax.legend()
 ax.set_aspect('equal')
 plt.tight_layout()
 plt.show()
 
-# ─── PLOT 2: Zoom a los 3 mayores picos ──────────────────────
 top_k = 3
 peak_indices = np.argsort(y_real_mgd)[-top_k:][::-1]
 
@@ -1437,8 +1231,8 @@ for rank, peak_idx in enumerate(peak_indices, 1):
     p_pred = y_pred_mgd[peak_idx]
     err = (p_pred - p_real) / p_real * 100
 
-    ax.set_title(f'H={H} — Pico #{rank}: Real {p_real:.1f} -> Pred {p_pred:.1f} MGD ({err:+.0f}%)',
-                 fontsize=12, fontweight='bold')
+    ax.set_title(f'{MODEL_NAME} — Pico #{rank}: Real {p_real:.1f} -> Pred {p_pred:.1f} MGD ({err:+.0f}%)',
+                fontsize=12, fontweight='bold')
     ax.set_xlabel('Indice temporal (cada unidad = 5 min)')
     ax.set_ylabel('Stormflow (MGD)')
     ax.legend()
