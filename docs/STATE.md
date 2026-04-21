@@ -1,6 +1,6 @@
 # STATE.md - Estado actual del proyecto
 
-**Última actualización:** 2026-04-20 (añadidos hallazgos de revisión con Opus 4.7)
+**Última actualización:** 2026-04-21 (iter16 ejecutado, resultado catastrófico, secuencia 16-20 detenida)
 **Mantenido por:** Aimar (actualizar al final de cada sesión de trabajo significativa).
 
 ---
@@ -10,6 +10,8 @@
 **Nombre:** `modelo_H1_sinSF` (v1)
 **Fecha de entrenamiento:** 2026-04-13
 **Ubicación de pesos:** `MC-CL-005/Pesos 13-04-2026/modelo_H1_sinSF_weights.pt`
+
+> **Aviso crítico (21-abril):** v1 sigue siendo el "mejor modelo disponible" por NSE, pero el diagnóstico de iter16 confirma que su ganancia sobre el predictor naive (+0.050 NSE a H=1) venía **en su totalidad** del atajo `delta_flow_5m` + `delta_flow_15m`. El modelo no aprende la dinámica lluvia-stormflow. Es un AR(1) disfrazado. Ver sección "Diagnóstico de iter16" abajo.
 
 ### Arquitectura
 - TwoStageTCN (clasificador + regresor sobre backbone compartido).
@@ -24,15 +26,9 @@
 ### Hiperparámetros
 - Horizonte de predicción: 1 paso (5 minutos).
 - Sequence length: 72 pasos (6 horas de contexto).
-- Batch size: 256.
-- Optimizador: AdamW.
-- Learning rate: 5e-4.
-- Weight decay: 1e-4.
-- Max epochs: 100.
-- Early stopping patience: 10.
-- Early stopping min_delta: 1e-5.
-- Grad clip max norm: 1.0.
-- Scheduler: ReduceLROnPlateau (factor=0.5, patience=4).
+- Batch size: 256. Optimizador: AdamW. Learning rate: 5e-4. Weight decay: 1e-4.
+- Max epochs: 100. Early stopping patience: 10. Early stopping min_delta: 1e-5.
+- Grad clip max norm: 1.0. Scheduler: ReduceLROnPlateau (factor=0.5, patience=4).
 - Mejor época en entrenamiento: 6.
 
 ### Features (22)
@@ -41,7 +37,8 @@ rain_sum_10m, rain_sum_15m, rain_sum_30m, rain_sum_60m,
 rain_sum_120m, rain_sum_180m, rain_sum_360m,
 rain_max_10m, rain_max_30m, rain_max_60m,
 minutes_since_last_rain,
-delta_flow_5m, delta_flow_15m, delta_rain_10m, delta_rain_30m,
+**delta_flow_5m, delta_flow_15m** (atajo AR(1) confirmado en iter16),
+delta_rain_10m, delta_rain_30m,
 hour_sin, hour_cos, month_sin, month_cos
 
 ### Loss
@@ -49,268 +46,127 @@ TwoStageLoss (componente 0.3 BCE para clasificador + componente 0.7 Huber para r
 
 ### Normalización
 log1p + z-score. Aplicado al target y a features de lluvia.
-Parámetros guardados en `modelo_H1_sinSF_norm_params.json`.
 
 ---
 
-## Resultados del último eval (16-abril-2026)
+## Resultados del último eval (21-abril-2026)
 
-Generado por `evaluate_local.py`. Fuente autoritativa: `outputs/data_analysis/local_eval_metrics.json`.
+Generado por `evaluate_local.py`. Incluye iter16.
 
-### Comparación global: SIN stormflow como feature
+### Comparación global (ordenado por NSE descendente)
 
-| Horizonte | Min  | NSE     | RMSE | MAE  | Error Pico | Bias Base | Bias Extremo |
-|-----------|------|---------|------|------|------------|-----------|--------------|
-| H=1       | 5m   | 0.861   | 0.89 | 0.29 | -21.0%     | +0.21     | -12.7        |
-| H=3       | 15m  | 0.471   | 1.74 | 0.38 | -52.1%     | +0.25     | -15.9        |
-| H=6       | 30m  | -1.212  | 3.57 | 1.21 | -78.2%     | +0.94     | -50.5        |
+| Modelo | NSE | RMSE | MAE | ErrPico | BiasBase | BiasExt |
+|---|---:|---:|---:|---:|---:|---:|
+| H1_sinSF (v1) | **0.861** | 0.89 | 0.29 | -21.0% | +0.21 | -12.7 |
+| H1_conSF (v1) | 0.854 | 0.92 | 0.24 | +58.8% | +0.18 | -8.9 |
+| H1_sinSF_v2 | 0.798 | 1.08 | 0.31 | +33.4% | +0.20 | -5.5 |
+| H3_conSF | 0.488 | 1.72 | 0.35 | -48.6% | +0.24 | -20.4 |
+| H3_sinSF | 0.471 | 1.74 | 0.38 | -52.1% | +0.25 | -15.9 |
+| H6_conSF | 0.255 | 2.07 | 0.49 | -88.2% | +0.28 | -57.4 |
+| **H1_sinSF_iter16** | **-0.169** | **2.60** | **0.63** | **+358.6%** | **+0.48** | **+39.2** |
+| H6_sinSF | -1.212 | 3.57 | 1.21 | -78.2% | +0.94 | -50.5 |
 
-### Comparación global: CON stormflow como feature (autoregresivo)
+### NSE vs naive (DATASET_STATS §8)
 
-| Horizonte | Min  | NSE     | RMSE | MAE  | Error Pico | Bias Base | Bias Extremo |
-|-----------|------|---------|------|------|------------|-----------|--------------|
-| H=1       | 5m   | 0.853   | 0.92 | 0.24 | +59.4%     | +0.18     | -8.8         |
-| H=3       | 15m  | 0.488   | 1.72 | 0.35 | -48.5%     | +0.24     | -20.4        |
-| H=6       | 30m  | 0.255   | 2.08 | 0.49 | -88.2%     | +0.28     | -57.5        |
-
-### Diagnóstico por rangos de magnitud (H=1 SIN SF, el modelo en producción)
-
-| Rango MGD          | Muestras | MAPE    | NSE      |
-|---------------------|----------|---------|----------|
-| Base (<0.5)        | 152,904  | 73,606% | -14.51   |
-| Leve (0.5-5)       | 9,518    | 59.8%   | -0.26    |
-| Moderado (5-20)    | 2,305    | 25.8%   | +0.19    |
-| Alto (20-50)       | 437      | 19.9%   | +0.02    |
-| Extremo (>50)      | 59       | 30.3%   | -0.99    |
-
-### Diagnóstico por rangos de magnitud (H=1 CON SF)
-
-| Rango MGD          | Muestras | MAPE    | NSE      |
-|---------------------|----------|---------|----------|
-| Base (<0.5)        | 152,901  | 66.7%   | -9.8     |
-| Leve (0.5-5)       | 9,520    | 32.4%   | 0.41     |
-| Moderado (5-20)    | 2,303    | 17.1%   | 0.51     |
-| Alto (20-50)       | 440      | 18.6%   | 0.03     |
-| Extremo (>50)      | 59       | 39.8%   | -2.4     |
-
-### Versión v2 (modelo_H1_sinSF_v2, 16-abril-2026)
-
-Reentrenamiento del mismo modelo H1_sinSF con ligeros ajustes. Captura ligeramente mejor los picos que v1 pero su NSE global es inferior. **v1 sigue siendo el modelo en producción** por NSE global. Plots de comparación en `outputs/figures/local_eval/v1vs_v2_*.png`.
+| Horizonte | NSE naive | NSE v1 sinSF | Ganancia |
+|-----------|----------:|-------------:|---------:|
+| H=1 | 0.811 | 0.861 | **+0.050** (toda ella del atajo delta_flow, ver iter16) |
+| H=3 | 0.409 | 0.471 | +0.062 |
+| H=6 | 0.081 | -1.212 | -1.293 |
 
 ---
 
-## Qué funciona
+## Diagnóstico de iter16 (21-abril)
 
-- **Eventos moderados (5-20 MGD) a H=1 SIN SF:** MAPE 25.8%, NSE=0.19 (modesto pero positivo). Con SF sube a NSE=0.52.
-- **Eventos leves (0.5-5 MGD) a H=1 CON SF:** MAPE 32%, NSE=0.41. Sin SF el NSE es negativo (-0.26).
-- **Predicción base (flujo sin tormenta):** sesgo pequeño y estable (bias ≈ +0.21 MGD).
-- **Timing del pico:** el modelo acierta bastante bien CUÁNDO ocurre el pico a H=1.
+Detalle completo en `EXPERIMENTS.md` entrada "Iteración 16".
 
----
+### Qué reveló iter16
 
-## Qué NO funciona
+- Quitar `delta_flow_5m` y `delta_flow_15m` (pasando de 22 a 20 features) colapsa el modelo: NSE=-0.169, error pico +358%, bias extremo +39 MGD, predicciones de hasta 625 MGD (extrapolación x3 sobre el máximo del train).
+- La ganancia de +0.050 NSE del modelo v1 sobre el predictor naive **venía entera** de esas dos features. No había aprendizaje hidrológico real.
+- `H1_conSF` (con `stormflow_mgd` como feature directa) da NSE=0.854, casi idéntico a v1 sinSF. Confirma que toda la señal útil del modelo era autoregresiva, no hidrológica.
+- El aparato de TwoStageTCN (backbone dilatado, clasificador+regresor, loss asimétrica, switch duro) no aportaba señal; era infraestructura sobre un AR(1) que funcionaba por las dos features de atajo.
 
-### Infraestimación sistemática de picos extremos
-- Error en pico del ~83% es estructural, no aleatorio.
-- Baja varianza entre runs repetidos con diferentes seeds.
-- El regresor TIENE capacidad de predecir >100 MGD, pero NO discrimina magnitudes correctamente en extremos.
+### Hallazgo colateral que invalida documentación previa
 
-### 15 de 59 eventos extremos sin lluvia en la ventana de entrada
-- Probablemente escorrentía retardada o deshielo.
-- Con las features actuales son físicamente impredecibles.
-- Documentado en `outputs/data_analysis/extreme_events_no_rain.json`.
+El eval reporta **0 eventos extremos sin lluvia en ventana de 72 pasos**, no 15 como se documentaba. Queda invalidado el argumento de "impredecibilidad física" que se usaba para justificar el error en bucket Extremo. Los 59/59 extremos del test tienen lluvia detectable en las 6h previas.
 
-### Degradación brutal con el horizonte
-- De H=1 a H=3: NSE baja de 0.82 a 0.54 (~-34%).
-- De H=3 a H=6: NSE colapsa a -0.45.
-- H=6 (30 min) NO es operativamente útil con los datos actuales.
+### Implicaciones
 
-### Dominancia del flujo base en las métricas globales
-- 92% de las muestras son base (<0.5 MGD).
-- NSE y RMSE globales están dominados por el régimen donde el modelo funciona bien.
-- Las métricas por rangos son más informativas para el caso operativo.
+1. La métrica NSE global es engañosa en este problema: 92% de las muestras son baseflow y dominan el denominador.
+2. Horizonte H=1 (5 min) es operativamente poco útil para el MSD (los operadores necesitan más margen). H=3 y H=6 son los que importan operativamente, y ahí el modelo es mucho peor o directamente peor que naive.
+3. Sin modelo de lluvia externo disponible (decisión del 21-abril: no se usará en esta fase), el techo físico estimado por Opus está en NSE 0.88-0.92 a H=1, pero requiere predicción real de extremos con lluvia, no AR(1) disfrazado.
 
 ---
 
+## Iteraciones 17-20 descartadas
 
-## Hallazgos del análisis del dataset (2026-04-20)
+El plan de iteraciones post-Opus (16-20) se detiene aquí. Motivos:
 
-Generado por `scripts/generate_dataset_stats.py`. Documento completo: `docs/DATASET_STATS.md`. Números brutos: `outputs/data_analysis/dataset_stats.json`.
-
-### [ALTA] El modelo apenas bate al predictor naive
-
-Un predictor trivial `y_pred(t+h) = y(t)` (persistencia) obtiene sobre test:
-
-| Horizonte | NSE naive | NSE modelo SIN SF | Ganancia |
-|-----------|----------:|------------------:|---------:|
-| H=1       | ~0.826    | 0.861             | +0.035   |
-| H=3       | ~0.512    | 0.471             | -0.041   |
-| H=6       | ~0.309    | -1.212            | -1.521   |
-
-El modelo mejora marginalmente al naive a H=1 y es peor a H≥3. Un script de una línea (`y_pred = y_last`) supera a la TCN a H=3.
-
-**Implicación:** todas las métricas reportadas deben incluir el baseline naive como referencia. Reportar NSE=0.861 a H=1 sin contextualizar es engañoso.
-
-### [ALTA] Asimetría de extremos entre splits
-
-| Split | n extremos (>50 MGD) | Max MGD |
-|-------|---------------------:|--------:|
-| train | 677                  | 199.4   |
-| val   | 97                   | **225.3** (máximo absoluto del dataset) |
-| test  | 59                   | 135.2   |
-
-El modelo se evalúa en test sobre un régimen menos extremo que el de entrenamiento, mientras que val incluye el pico absoluto. El early stopping sobre val puede estar favoreciendo infraestimación de picos grandes.
-
-### [MEDIA] Redundancia masiva entre features
-
-36 pares de features con |Pearson| ≥ 0.7 sobre 22 features totales. Casos más extremos:
-- `rain_sum_10m` vs `rain_max_10m`: 0.985
-- `rain_sum_10m` vs `rain_sum_15m`: 0.970
-- `api_dynamic` correlaciona >0.7 con 9 features distintas
-
-Número efectivo de dimensiones independientes entre las 22 features: probablemente ~8-10.
-
-### [MEDIA] ACF del target limita predictibilidad a H>1
-
-ACF(5 min) = 0.909. ACF(30 min) = 0.556. La ACF decae rápido tras los primeros 30 minutos. Sin incorporar predicción de lluvia externa (opción c), extender horizonte útil más allá de ~15 min tiene límite físico.
-
-### [MEDIA] Tamaño muestral insuficiente para bucket Extremo
-
-Solo 59 muestras extremas en test. Las métricas sobre ese bucket (NSE=-0.99, bias=-12.7 MGD) tienen alta varianza. Un único evento atípico puede desplazarlas.
+- **iter17 (regresor no-condicional) descartada**: asumía que el modelo aprendía hidrología pero el regresor generaba OOD en baseflow. Con NSE global negativo tras quitar el atajo, no hay señal que estabilizar.
+- **iter18 (peak_lag_minutes) queda pendiente** como métrica adicional útil para cualquier modelo nuevo, pero no como iteración en sí.
+- **iter19 (split por años) queda pendiente** como ajuste metodológico para el futuro modelo.
+- **iter20 (reducción de features por PI) queda pendiente** hasta tener un modelo que realmente use las features de lluvia.
 
 ---
 
-### Hallazgos adicionales de revisión externa con Opus 4.7 (2026-04-20)
+## Fase de diagnóstico profundo (en curso desde 21-abril)
 
-Revisión completa archivada en `docs/OPUS_REVIEW_2026-04-20.md`. Los hallazgos que se añaden a los de sección anterior son:
+Antes de decidir el camino nuevo (cambio de target, cambio de arquitectura, reformulación del problema, etc.), se lanza una auditoría completa del proyecto con Claude Code usando subagentes especializados.
 
-#### [ALTO] Inconsistencia train/inference del regresor en TwoStageTCN
+**Objetivo:** obtener un `DIAGNOSTIC_REPORT.md` con baselines rigurosos, auditoría de código, análisis de extremos, y **una recomendación única del mejor camino a seguir** con los datos actuales (sin modelo de lluvia externo).
 
-`src/models/loss.py:182-188` entrena el regresor solo en muestras con `y_true_real > 0.5 MGD` (~10% del batch). Durante inferencia, el switch duro con threshold=0.3 ejecuta el regresor también en muestras que el clasificador marca como evento por falso positivo. El regresor nunca ha visto esas regiones, produce salida OOD, y contamina el bucket Base (bias=+0.21 MGD no es ruido, es firma OOD).
+**Restricciones fijadas:**
+- No se usará modelo de lluvia externo del MSD.
+- Claude Code trabaja en rama `diagnostico`, no toca `main`.
+- Claude Code NO implementa la solución final; solo diagnostica y recomienda.
+- Decisión final sobre arquitectura, target y enfoque la toma Aimar tras revisar el reporte.
 
-**Acción pendiente:** entrenar el regresor en TODAS las muestras manteniendo los pesos por magnitud. Mantener switch duro en inferencia.
+**Prompt maestro:** `PROMPT_CLAUDE_CODE.md` (generado 21-abril).
 
-#### [MODERADO] `delta_flow_5m` y `delta_flow_15m` son puerta trasera al atajo de flow_total_mgd
+**Subagentes planificados (6):**
+1. Auditoría de pipeline y búsqueda de leakages adicionales.
+2. Baselines rigurosos (naive, AR(1), AR(k), XGBoost, Random Forest, regresión física).
+3. Análisis de los 59 eventos extremos del test, uno a uno.
+4. Evaluación de techo físico por horizonte y por bucket de magnitud.
+5. Análisis de redundancia de features y permutation importance.
+6. Revisión de arquitecturas alternativas (LSTM hidrológica, TFT, atención temporal, etc.) sin entrenar.
 
-Como `flow_total ≈ baseflow + stormflow` y baseflow varía lento, `delta_flow[t] ≈ delta_stormflow[t]`. Estas features transportan de facto la derivada del target en t, reintroduciendo el atajo que se cerró en iter 11 al quitar `flow_total_mgd`.
-
-**Hipótesis a verificar empíricamente:** si al eliminar estas dos features el NSE cae al nivel del naive (~0.82), el modelo está haciendo AR(1) disfrazado en lugar de aprender lluvia→stormflow.
-
-#### [ALTO] Pregunta crítica sin verificar: ¿la ganancia sobre naive viene de los delta_flow o de la lluvia?
-
-La ganancia del modelo sobre naive es solo +0.050 NSE a H=1. Si esa ganancia proviene de `delta_flow_*`, el aparato de TwoStageTCN + 22 features es teatro sobre un AR(1). Si proviene de la lluvia, el modelo sí aprende hidrología pero marginalmente.
-
-**Esta es la pregunta que decide la dirección del proyecto.** Se responde con el ablation de la iteración 16.
-
-#### [PENDIENTE DE VERIFICAR] Afirmación sin medición: "el modelo acierta cuándo ocurre el pico"
-
-Actualmente se afirma en la sección "Qué funciona" sin métrica asociada. Hace falta implementar `peak_lag_minutes` en `evaluate_local.py` para cuantificar el error de timing separado del error de magnitud.
-
-#### [PENDIENTE DE VERIFICAR] Afirmación sin evidencia: "15 extremos sin lluvia son físicamente impredecibles"
-
-Esta defensa es usada para justificar el error en bucket Extremo pero no se ha cruzado con `temp_daily_f` ni con `rain_sum_*` de 24-72h previas. Si los eventos se concentran en enero-marzo con temperaturas bajas + nieve acumulada, son predecibles con las features actuales y la afirmación es falsa.
-
-**Acción pendiente:** análisis cruzado que genere `docs/EXTREME_EVENTS_ANALYSIS.md`.
-
-#### Cotas de NSE alcanzable (derivadas del análisis de Opus)
-
-Descomposición del denominador de NSE por bucket sobre test:
-
-- Bucket Extremo contribuye ~18% del denominador.
-- Bucket Alto contribuye ~24%.
-- Buckets Moderado+Leve contribuyen ~32%.
-- Bucket Base contribuye ~26%.
-
-Cota superior estimada a H=1 con features actuales: **NSE alcanzable 0.88-0.92** (predicción perfecta de extremos con lluvia + mejora moderada del resto). Cota para peak_err_pct en bucket Extremo filtrado a los 44 con lluvia: **-5% con regresor óptimo**. Por encima de 0.92 se requieren señales externas (radar de lluvia futura, saturación del suelo, deshielo explícito).
-
-## Siguientes pasos priorizados
-
-**Prioridad actual:** mejorar el modelo. El TFM se redactará después (margen hasta septiembre 2026).
-
-Plan de iteraciones tras la revisión con Opus 4.7 (2026-04-20). Cada iteración es independiente en atribución: se ejecutan y evalúan por separado para saber qué aportó cada cambio.
-
-### Iteración 16 — Ablation de `delta_flow_*` [INMEDIATA]
-
-Eliminar `delta_flow_5m` y `delta_flow_15m` de `FEATURE_COLUMNS` en `claude_train.py` (pasa de 22 a 20 features). Reentrenar `modelo_H1_sinSF`. Evaluar con `evaluate_local.py`.
-
-**Responde:** ¿la ganancia de +0.050 NSE sobre el naive viene de estas features o de la lluvia?
-
-**Decide:** si NSE cae a 0.81-0.82 (nivel naive), el proyecto cambia de enfoque radical. Si cae a 0.84-0.85, seguir con iteración 17. Si se mantiene o mejora, las features eran redundantes/dañinas y seguimos.
-
-### Iteración 17 — Regresor no-condicional en TwoStageLoss
-
-Modificar `src/models/loss.py` para que el regresor se entrene sobre TODAS las muestras, no solo las de evento. Mantener switch duro en inferencia. Mantener los pesos por magnitud.
-
-**Responde:** ¿el bias del bucket Base (+0.21 MGD) es OOD del regresor o ruido real?
-
-**Decide:** si bias_base baja claramente (≤+0.05) y NSE no empeora, la hipótesis A2 de Opus es correcta. Si empeora, se revierte.
-
-### Iteración 18 — Añadir `peak_lag_minutes` a evaluación
-
-No es reentrenamiento. Añadir métrica de error de timing a `evaluate_local.py` y re-evaluar el mejor modelo que tengamos a estas alturas.
-
-**Responde:** ¿el modelo realmente acierta "cuándo" ocurre el pico, o es una afirmación sin verificar?
-
-### Análisis paralelo — Los 15 extremos sin lluvia (D3 de Opus)
-
-Notebook local (no Colab, no GPU). Cruzar los 15 eventos sin lluvia con `temp_daily_f` y acumulados de 24-72h previas. Generar `docs/EXTREME_EVENTS_ANALYSIS.md`.
-
-**Responde:** ¿son realmente "físicamente impredecibles" o tienen patrón (deshielo, temperaturas bajas precedidas de nieve)?
-
-### Iteración 19 — Cambio de split a años completos
-
-Modificar `src/pipeline/split.py` para cortar en años calendario (8 train / 1 val / 1.5 test) en lugar de 70/15/15 por filas. Reentrenar con el mejor modelo disponible.
-
-**Responde:** ¿la evaluación actual sobre-estima o sub-estima el rendimiento real?
-
-### Iteración 20 — Reducción de features por permutation importance
-
-Con el modelo ya limpio (iteraciones 16-17 aplicadas), calcular PI de forma fiable. Eliminar redundancias según `DATASET_STATS.md` sección 5. Objetivo: 10 features sin perder NSE.
-
-### Condiciones de parada y bloqueos
-
-- Si iteración 16 revela NSE=0.82, se detiene la secuencia y se reevalúa todo.
-- Opción (c) original (modelo de lluvia externo del MSD) sigue bloqueada esperando reunión con el jefe. Si se desbloquea, salta al primer puesto.
+**Artefacto final esperado:** `outputs/diagnostic/DIAGNOSTIC_REPORT.md` con resumen ejecutivo, hallazgos por área, caminos posibles y **recomendación única** con justificación técnica.
 
 ---
 
 ## Bloqueos actuales
 
-Ninguno técnico. El proyecto avanza. La decisión pendiente es qué iteración probar a continuación (ver "Siguientes pasos").
+Ninguno técnico para lanzar el diagnóstico. La decisión pendiente es la del camino nuevo, que se tomará tras el reporte de Claude Code.
 
 ---
 
 ## Estado del TFM (documento académico)
 
-**No iniciada la redacción extensa.** El plan es:
-- Estructura definida (6 secciones). Ver abajo.
-- Estado del arte parcialmente estructurado en NotebookLM (3 notebooks temáticos con 22 papers).
-- Redacción extensa: a partir de que el modelo esté cerrado. Margen hasta septiembre 2026.
+**No iniciada la redacción extensa.** Margen hasta septiembre 2026.
+
+Lo aprendido en iter16 (que el modelo v1 era AR(1) disfrazado) es un hallazgo de alto valor académico si se presenta bien. La sección de resultados del TFM puede estructurarse en torno a: planteamiento inicial, fallo detectado mediante baseline naive, replanteamiento, modelo final. Es un arco narrativo honesto y publicable.
 
 ### Estructura actual del TFM
 1. Introducción y contexto institucional (MSD, CSOs, Consent Decree).
 2. Marco teórico / Estado del Arte (TCN, LSTM, modelos hidrológicos, zero-inflated models).
 3. Metodología (datos, features, arquitectura, loss, entrenamiento).
-4. Resultados y análisis:
-   - Curva de predicibilidad por horizonte (SIN SF y CON SF).
-   - Diagnóstico por rangos de magnitud.
-   - Análisis de eventos sin lluvia vs con lluvia.
-   - Visualización de eventos moderados donde el modelo funciona bien.
+4. Resultados y análisis (incluir ahora el hallazgo del AR(1) disfrazado).
 5. Discusión (limitaciones, por qué los extremos son difíciles, valor operativo).
-6. Conclusiones y trabajo futuro (integración con modelo de lluvia, sistema de alertas, TimeSeriesSplit).
+6. Conclusiones y trabajo futuro.
 
 ---
 
 ## Artefactos generados más recientes
 
-- **Plots locales:** 56 archivos en `outputs/figures/local_eval/` (16-abril-2026).
-- **Métricas:** `outputs/data_analysis/local_eval_metrics.json` (16-abril-2026).
-- **Análisis de extremos sin lluvia:** `outputs/data_analysis/extreme_events_no_rain.json` (16-abril-2026).
-- **Threshold sweeps:** `threshold_sweep_H1_conSF.json` y `threshold_sweep_H1_sinSF.json`.
-- **Pesos de los 7 modelos entrenados:** `MC-CL-005/Pesos 13-04-2026/`.
+- **Plots locales:** `outputs/figures/local_eval/` (actualizado 21-abril con iter16).
+- **Métricas:** `outputs/data_analysis/local_eval_metrics.json` (21-abril).
+- **Análisis de extremos sin lluvia:** `outputs/data_analysis/extreme_events_no_rain.json` (21-abril, actualizado: 0 extremos sin lluvia en ventana de 72 pasos).
+- **Pesos de los 8 modelos entrenados:** `MC-CL-005/Pesos 13-04-2026/` (añadido iter16).
 
 ---
 
 ## Reuniones y comunicación externa
 
-- **Pendiente:** reunión con jefe del MSD para preguntar por el modelo de predicción de lluvia (formato, resolución temporal/espacial, horizonte, precisión).
+- **Decisión del 21-abril:** no se usará modelo de predicción de lluvia externo del MSD en esta fase. Primero hay que lograr un modelo que funcione con las features actuales. La reunión con el jefe queda despriorizada hasta tener un modelo mejor o decidir explícitamente que necesitamos esa palanca.

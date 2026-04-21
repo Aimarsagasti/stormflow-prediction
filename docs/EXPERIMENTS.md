@@ -245,3 +245,66 @@ Notebook `horizon_comparison.py`. Entrenamiento de 6 modelos: H={1,3,6} × {con 
 16. Stormflow como feature mejora métricas globales pero NO ayuda con picos extremos.
 17. El modelo funciona bien en eventos moderados (5-50 MGD) a H=1. Juzgarlo solo por extremos es injusto.
 18. Colab SOLO para entrenar. Todo análisis y plots en VS Code local.
+
+# EXPERIMENTS.md - Registro de iteraciones
+
+Registro de cada iteración del modelo con formato estándar: hipótesis, cambio aplicado, resultado, decisión.
+
+---
+
+## Iteración 16 - Ablation de `delta_flow_5m` y `delta_flow_15m`
+
+**Fecha:** 2026-04-21
+**Modelo:** `modelo_H1_sinSF_iter16`
+**Features:** 20 (v1 tenía 22, se eliminaron `delta_flow_5m` y `delta_flow_15m`)
+
+### Hipótesis
+
+Basada en la revisión externa de Opus 4.7 (ver `docs/OPUS_REVIEW_2026-04-20.md` §A1 y §D1):
+
+> Como $\text{flow\_total} = \text{baseflow} + \text{stormflow}$ y baseflow varía lentamente, se cumple que $\Delta\text{flow}(t) \approx \Delta\text{stormflow}(t)$. Estas features transportan de facto la derivada del target en $t$, reintroduciendo el atajo que se cerró en iter11 al quitar `flow_total_mgd`. Si al eliminarlas el NSE cae al nivel del naive (~0.811), el modelo está haciendo AR(1) disfrazado en lugar de aprender lluvia $\to$ stormflow.
+
+### Cambio aplicado
+
+Único cambio respecto a v1: eliminación de `delta_flow_5m` y `delta_flow_15m` de `FEATURE_COLUMNS`. Arquitectura (TwoStageTCN), loss (TwoStageLoss), hiperparámetros, split y normalización idénticos a v1.
+
+### Resultado
+
+Entrenamiento completado en 14 épocas (early stopping), mejor época = 4.
+
+| Métrica | v1 (22 feat) | iter16 (20 feat) | Delta |
+|---|---:|---:|---:|
+| NSE | +0.861 | **-0.169** | -1.030 |
+| RMSE | 0.89 MGD | 2.60 MGD | +1.71 |
+| MAE | 0.29 MGD | 0.63 MGD | +0.34 |
+| Error pico | -21.0% | **+358.6%** | cambio de signo |
+| Bias base | +0.21 MGD | +0.48 MGD | +0.27 |
+| Bias extremo | -12.7 MGD | **+39.2 MGD** | cambio de signo |
+| Pico predicho máx | ~106 MGD | **625 MGD** | extrapolación x3 fuera del rango del train (max=199 MGD) |
+
+Meta.json verificado: `n_features=20`, `delta_flow_*` confirmadas fuera de la lista. No hay bug.
+
+### Interpretación
+
+La hipótesis de Opus queda confirmada con mayor severidad de la esperada. No se trata de que la ganancia de +0.050 NSE sobre naive viniera de `delta_flow_*`. Se trata de que **toda la estabilidad numérica del modelo** dependía de esas dos features. Sin ellas:
+
+- El regresor no aprende lluvia $\to$ stormflow.
+- Extrapola sin cota en extremos (predice 625 MGD con máximo de train de 199 MGD).
+- Sobreestima masivamente incluso el baseflow (bias base x2).
+- `H1_conSF` (con `stormflow_mgd` como feature autoregresiva directa) sigue dando NSE=0.854, confirmando que toda la señal útil es autoregresiva.
+
+### Hallazgo colateral
+
+La evaluación local de iter16 reporta **0 eventos extremos sin lluvia en ventana de 72 pasos**, no 15 como se documentaba previamente en STATE.md §"Qué NO funciona" y en `extreme_events_no_rain.json`. Los 59/59 extremos del test tienen lluvia detectable en las 6h previas. Queda invalidado el argumento de "extremos físicamente impredecibles" que se usaba para justificar el error en bucket Extremo.
+
+### Decisión
+
+**Parar la secuencia de iteraciones 16-20 planificada tras la revisión de Opus.** El resultado de iter16 invalida la premisa de iter17 (regresor no-condicional para reducir bias base), que asumía que el modelo aprendía hidrología pero el regresor generaba OOD. Con NSE negativo global, no hay señal que estabilizar: no hay hidrología aprendida, es un AR(1) con features de adorno.
+
+**Próximo paso:** auditoría profunda con Claude Code (rama `diagnostico`) antes de decidir el camino nuevo. No se ejecutarán más iteraciones sobre el planteamiento actual hasta obtener el `DIAGNOSTIC_REPORT.md`.
+
+### Referencias
+
+- Datos brutos: `MC-CL-005/Pesos 13-04-2026/modelo_H1_sinSF_iter16_{weights.pt, norm_params.json, meta.json}`
+- Evaluación completa: `outputs/data_analysis/local_eval_metrics.json`
+- Prompt maestro para Claude Code: `PROMPT_CLAUDE_CODE.md`
