@@ -91,6 +91,13 @@ EXTRA_MODELS = [
         "variant":         "sinSF",
         "compare_against": "H1_sinSF",
     },
+    {
+        "key":             "H1_sinSF_iter16",
+        "weights_stem":    "modelo_H1_sinSF_iter16",
+        "horizon":         1,
+        "variant":         "sinSF",
+        "compare_against": "H1_sinSF",
+    },
 ]
 
 # Features de cada variante

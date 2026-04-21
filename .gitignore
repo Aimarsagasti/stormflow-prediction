@@ -211,3 +211,6 @@ MC-CL-005/
 outputs/figures/
 MC-CL-005/
 outputs/figures/
+
+# Configs locales (rutas especificas de cada maquina, no se comparten)
+configs/local*.yaml
