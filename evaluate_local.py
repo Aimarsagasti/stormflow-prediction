@@ -107,6 +107,46 @@ FEATURES_SIN_SF = [
 ]
 FEATURES_CON_SF = FEATURES_SIN_SF + ["stormflow_mgd"]
 
+def _load_features_from_meta(
+    weights_stem: str,
+    variant: str,
+) -> list[str]:
+    """
+    Carga la lista de features desde el meta.json asociado al modelo.
+
+    Si el meta.json no existe o no contiene la clave 'feature_columns',
+    cae en el fallback: FEATURES_SIN_SF o FEATURES_CON_SF segun variante.
+
+    Este mecanismo permite evaluar simultaneamente modelos con listas
+    de features distintas (p.ej. modelo_H1_sinSF con 22 features y
+    modelo_H1_sinSF_iter16 con 20) sin mantener constantes duplicadas.
+
+    Args:
+        weights_stem: nombre base del modelo, sin extension
+            (p.ej. "modelo_H1_sinSF_iter16").
+        variant: "sinSF" o "conSF", solo se usa para el fallback.
+
+    Returns:
+        Lista de features a usar para este modelo.
+    """
+    meta_path = WEIGHTS_DIR / f"{weights_stem}_meta.json"                  # Path al meta.json del modelo
+    fallback = FEATURES_CON_SF if variant == "conSF" else FEATURES_SIN_SF  # Lista a usar si no hay meta
+    if not meta_path.exists():                                             # Si no hay meta, avisar y usar fallback
+        print(f"[eval] AVISO: {meta_path.name} no existe. Usando features del fallback {variant}.")
+        return fallback
+    try:
+        with open(meta_path, "r") as f:
+            meta = json.load(f)
+    except (json.JSONDecodeError, OSError) as exc:                         # meta corrupto o ilegible
+        print(f"[eval] AVISO: no se pudo leer {meta_path.name} ({exc}). Usando fallback {variant}.")
+        return fallback
+    meta_features = meta.get("feature_columns") or meta.get("features")    # Soporta ambas claves por compatibilidad
+    if not isinstance(meta_features, list) or len(meta_features) == 0:     # Validacion minima
+        print(f"[eval] AVISO: {meta_path.name} no contiene 'feature_columns' valida. Usando fallback {variant}.")
+        return fallback
+    print(f"[eval] Features leidas de {meta_path.name}: {len(meta_features)}")
+    return meta_features
+
 TARGET_COL = "stormflow_mgd"
 AUX_COL    = "is_event"
 SEQ_LENGTH = 72
@@ -319,8 +359,9 @@ def evaluate_one_model(
     with open(norm_path, "r") as f:
         norm_params = json.load(f)
 
-    # Determinar qué features usar
-    features = FEATURES_CON_SF if variant == "conSF" else FEATURES_SIN_SF
+    # Determinar qué features usar: primero desde el meta.json del modelo,
+    # con fallback a FEATURES_SIN_SF/CON_SF si no hay meta o es invalido
+    features = _load_features_from_meta(weights_stem=stem, variant=variant)
 
     # Normalizar splits
     # Para conSF: pasar lista sin stormflow a normalize_splits para evitar doble normalización
@@ -1342,7 +1383,9 @@ def threshold_sweep(
         norm_params = json.load(f)
 
     # --- Preparar datos (misma lógica que evaluate_one_model) ---
-    features = FEATURES_CON_SF if variant == "conSF" else FEATURES_SIN_SF
+    # Leer features del meta.json del modelo, con fallback a FEATURES_SIN_SF/CON_SF
+    # (threshold_sweep siempre usa el patron estandar: stem = "modelo_{model_key}")
+    features = _load_features_from_meta(weights_stem=f"modelo_{model_key}", variant=variant)
     features_for_norm = [f for f in features if f != TARGET_COL]
 
     df_tn, df_vn, df_tsn, _ = normalize_splits(
