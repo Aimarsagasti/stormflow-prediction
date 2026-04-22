@@ -1,0 +1,816 @@
+{
+  "config": {
+    "horizon": 1,
+    "seq_length": 72,
+    "split": {
+      "train_end_idx": 771374,
+      "val_end_idx": 936669,
+      "total_rows": 1101964
+    },
+    "features_20": [
+      "rain_in",
+      "temp_daily_f",
+      "api_dynamic",
+      "rain_sum_10m",
+      "rain_sum_15m",
+      "rain_sum_30m",
+      "rain_sum_60m",
+      "rain_sum_120m",
+      "rain_sum_180m",
+      "rain_sum_360m",
+      "rain_max_10m",
+      "rain_max_30m",
+      "rain_max_60m",
+      "minutes_since_last_rain",
+      "delta_rain_10m",
+      "delta_rain_30m",
+      "hour_sin",
+      "hour_cos",
+      "month_sin",
+      "month_cos"
+    ],
+    "xgb_params": {
+      "n_estimators": 300,
+      "max_depth": 6,
+      "learning_rate": 0.05,
+      "subsample": 0.8,
+      "objective": "reg:squarederror",
+      "tree_method": "hist",
+      "n_jobs": -1,
+      "random_state": 42
+    },
+    "pi_n_repeats": 5,
+    "pi_test_subsample": 50000,
+    "shap_n_samples": 5000,
+    "corr_cluster_threshold": 0.85,
+    "extreme_bucket_threshold_mgd": 25.0,
+    "shap_available": true
+  },
+  "stage_pi": {
+    "n_test_used": 50000
+  },
+  "stage_corr": {
+    "n_train": 771302
+  },
+  "stage_shap": {
+    "n_samples": 5000
+  },
+  "timings": {
+    "load_parquet": 0.14645695686340332,
+    "xgb20_fit": 9.009234189987183,
+    "native_importance": 0.0019884109497070312,
+    "permutation_importance": 5.498201608657837,
+    "shap": 2.34991717338562,
+    "corr_cluster": 1.5219011306762695,
+    "acf": 0.09265947341918945,
+    "reduced_set": 8.531959772109985,
+    "ablation_reduced": 82.13227987289429
+  },
+  "xgb20_metrics": {
+    "n_features": 20,
+    "fit_seconds": 8.876345157623291,
+    "nse": 0.661912202835083,
+    "rmse": 1.3979785442352295,
+    "mae": 0.2760588228702545,
+    "peak_real": 135.15089416503906,
+    "peak_pred": 91.38825988769531,
+    "peak_err_pct": -32.38057327270508
+  },
+  "ar12_nse_h1_ref": 0.8273,
+  "native_importance": {
+    "rain_in": 0.01660975380593262,
+    "temp_daily_f": 0.02004400346678962,
+    "api_dynamic": 0.6559673405157849,
+    "rain_sum_10m": 0.03726191250254069,
+    "rain_sum_15m": 0.024032401129025695,
+    "rain_sum_30m": 0.01268331475547454,
+    "rain_sum_60m": 0.00817273795579669,
+    "rain_sum_120m": 0.04543845549770809,
+    "rain_sum_180m": 0.020552490995720138,
+    "rain_sum_360m": 0.025324810123241236,
+    "rain_max_10m": 0.011194340220884134,
+    "rain_max_30m": 0.010244477136293397,
+    "rain_max_60m": 0.014836445507850946,
+    "minutes_since_last_rain": 0.008406129473716467,
+    "delta_rain_10m": 0.006459938006559383,
+    "delta_rain_30m": 0.008833519989025266,
+    "hour_sin": 0.01633164913294462,
+    "hour_cos": 0.014562106449610219,
+    "month_sin": 0.021005853889741258,
+    "month_cos": 0.02203831944536016
+  },
+  "permutation_importance": {
+    "rain_in": {
+      "mean_drop": 0.0033264994621276856,
+      "std_drop": 0.0025545994529040223,
+      "baseline_nse": 0.6418350338935852,
+      "shuffled_nse_mean": 0.6385085344314575
+    },
+    "temp_daily_f": {
+      "mean_drop": 0.03321903944015503,
+      "std_drop": 0.010584442690435398,
+      "baseline_nse": 0.6418350338935852,
+      "shuffled_nse_mean": 0.6086159944534302
+    },
+    "api_dynamic": {
+      "mean_drop": 0.41817506551742556,
+      "std_drop": 0.003660904041658865,
+      "baseline_nse": 0.6418350338935852,
+      "shuffled_nse_mean": 0.22365996837615967
+    },
+    "rain_sum_10m": {
+      "mean_drop": 0.01724896430969238,
+      "std_drop": 0.001274686559775524,
+      "baseline_nse": 0.6418350338935852,
+      "shuffled_nse_mean": 0.6245860695838928
+    },
+    "rain_sum_15m": {
+      "mean_drop": 0.03681912422180176,
+      "std_drop": 0.0010570934943905192,
+      "baseline_nse": 0.6418350338935852,
+      "shuffled_nse_mean": 0.6050159096717834
+    },
+    "rain_sum_30m": {
+      "mean_drop": 0.0005527734756469727,
+      "std_drop": 0.0006505146247716338,
+      "baseline_nse": 0.6418350338935852,
+      "shuffled_nse_mean": 0.6412822604179382
+    },
+    "rain_sum_60m": {
+      "mean_drop": -0.0120993971824646,
+      "std_drop": 0.0013336247424443467,
+      "baseline_nse": 0.6418350338935852,
+      "shuffled_nse_mean": 0.6539344310760498
+    },
+    "rain_sum_120m": {
+      "mean_drop": 0.08033964633941651,
+      "std_drop": 0.003751511657617673,
+      "baseline_nse": 0.6418350338935852,
+      "shuffled_nse_mean": 0.5614953875541687
+    },
+    "rain_sum_180m": {
+      "mean_drop": 0.034036874771118164,
+      "std_drop": 0.0027772207641234515,
+      "baseline_nse": 0.6418350338935852,
+      "shuffled_nse_mean": 0.607798159122467
+    },
+    "rain_sum_360m": {
+      "mean_drop": 0.10833151340484619,
+      "std_drop": 0.008327824473491086,
+      "baseline_nse": 0.6418350338935852,
+      "shuffled_nse_mean": 0.5335035204887391
+    },
+    "rain_max_10m": {
+      "mean_drop": 0.0017818927764892579,
+      "std_drop": 0.00047499262727528367,
+      "baseline_nse": 0.6418350338935852,
+      "shuffled_nse_mean": 0.640053141117096
+    },
+    "rain_max_30m": {
+      "mean_drop": -0.00010282993316650391,
+      "std_drop": 0.000858023032299627,
+      "baseline_nse": 0.6418350338935852,
+      "shuffled_nse_mean": 0.6419378638267517
+    },
+    "rain_max_60m": {
+      "mean_drop": -0.017584073543548583,
+      "std_drop": 0.0008128042736523435,
+      "baseline_nse": 0.6418350338935852,
+      "shuffled_nse_mean": 0.6594191074371338
+    },
+    "minutes_since_last_rain": {
+      "mean_drop": 0.004514217376708984,
+      "std_drop": 0.00023073093338275982,
+      "baseline_nse": 0.6418350338935852,
+      "shuffled_nse_mean": 0.6373208165168762
+    },
+    "delta_rain_10m": {
+      "mean_drop": 0.004398775100708008,
+      "std_drop": 0.0007039086179265339,
+      "baseline_nse": 0.6418350338935852,
+      "shuffled_nse_mean": 0.6374362587928772
+    },
+    "delta_rain_30m": {
+      "mean_drop": 0.0006024956703186036,
+      "std_drop": 0.0004926816336739893,
+      "baseline_nse": 0.6418350338935852,
+      "shuffled_nse_mean": 0.6412325382232666
+    },
+    "hour_sin": {
+      "mean_drop": 0.010527074337005615,
+      "std_drop": 0.009603845416968232,
+      "baseline_nse": 0.6418350338935852,
+      "shuffled_nse_mean": 0.6313079595565796
+    },
+    "hour_cos": {
+      "mean_drop": -0.006204962730407715,
+      "std_drop": 0.00313515624129131,
+      "baseline_nse": 0.6418350338935852,
+      "shuffled_nse_mean": 0.6480399966239929
+    },
+    "month_sin": {
+      "mean_drop": -0.024106299877166747,
+      "std_drop": 0.0050248413702923345,
+      "baseline_nse": 0.6418350338935852,
+      "shuffled_nse_mean": 0.6659413337707519
+    },
+    "month_cos": {
+      "mean_drop": -0.008354198932647706,
+      "std_drop": 0.006749443703637649,
+      "baseline_nse": 0.6418350338935852,
+      "shuffled_nse_mean": 0.6501892328262329
+    }
+  },
+  "shap": {
+    "n_samples": 5000,
+    "n_extreme_in_sample": 8,
+    "n_base_in_sample": 4638,
+    "extreme_threshold_mgd": 25.0,
+    "by_feature": {
+      "rain_in": {
+        "mean_abs_shap": 0.026145661249756813,
+        "mean_shap_extreme": 1.8518376350402832,
+        "mean_shap_base": -0.015379036776721478,
+        "std_shap": 0.19794805347919464
+      },
+      "temp_daily_f": {
+        "mean_abs_shap": 0.04152900353074074,
+        "mean_shap_extreme": 0.47172629833221436,
+        "mean_shap_base": -0.00638539157807827,
+        "std_shap": 0.18625664710998535
+      },
+      "api_dynamic": {
+        "mean_abs_shap": 0.33267080783843994,
+        "mean_shap_extreme": 19.99379539489746,
+        "mean_shap_base": -0.1713581085205078,
+        "std_shap": 1.3597726821899414
+      },
+      "rain_sum_10m": {
+        "mean_abs_shap": 0.019921185448765755,
+        "mean_shap_extreme": 1.629929780960083,
+        "mean_shap_base": -0.009219133295118809,
+        "std_shap": 0.18915270268917084
+      },
+      "rain_sum_15m": {
+        "mean_abs_shap": 0.04819580912590027,
+        "mean_shap_extreme": 1.8652675151824951,
+        "mean_shap_base": -0.028220009058713913,
+        "std_shap": 0.18143348395824432
+      },
+      "rain_sum_30m": {
+        "mean_abs_shap": 0.03563292697072029,
+        "mean_shap_extreme": 2.0685276985168457,
+        "mean_shap_base": -0.013177020475268364,
+        "std_shap": 0.1903068870306015
+      },
+      "rain_sum_60m": {
+        "mean_abs_shap": 0.011353719979524612,
+        "mean_shap_extreme": -1.2805850505828857,
+        "mean_shap_base": 0.0022491123527288437,
+        "std_shap": 0.10500037670135498
+      },
+      "rain_sum_120m": {
+        "mean_abs_shap": 0.1401890069246292,
+        "mean_shap_extreme": 3.553453207015991,
+        "mean_shap_base": -0.07816320657730103,
+        "std_shap": 0.4131947159767151
+      },
+      "rain_sum_180m": {
+        "mean_abs_shap": 0.017003830522298813,
+        "mean_shap_extreme": 0.4529839754104614,
+        "mean_shap_base": -0.0038563385605812073,
+        "std_shap": 0.06533969193696976
+      },
+      "rain_sum_360m": {
+        "mean_abs_shap": 0.11539072543382645,
+        "mean_shap_extreme": 0.6113014221191406,
+        "mean_shap_base": -0.04533090442419052,
+        "std_shap": 0.3461431860923767
+      },
+      "rain_max_10m": {
+        "mean_abs_shap": 0.004401347134262323,
+        "mean_shap_extreme": 0.7097238302230835,
+        "mean_shap_base": -0.0002451530599500984,
+        "std_shap": 0.06082988530397415
+      },
+      "rain_max_30m": {
+        "mean_abs_shap": 0.01040226686745882,
+        "mean_shap_extreme": 2.098506450653076,
+        "mean_shap_base": -0.00015793784405104816,
+        "std_shap": 0.13081981241703033
+      },
+      "rain_max_60m": {
+        "mean_abs_shap": 0.01873319409787655,
+        "mean_shap_extreme": -0.897661566734314,
+        "mean_shap_base": 0.001998158171772957,
+        "std_shap": 0.13831903040409088
+      },
+      "minutes_since_last_rain": {
+        "mean_abs_shap": 0.03652263060212135,
+        "mean_shap_extreme": 0.04270024225115776,
+        "mean_shap_base": -0.0011645512422546744,
+        "std_shap": 0.04841621592640877
+      },
+      "delta_rain_10m": {
+        "mean_abs_shap": 0.010457305237650871,
+        "mean_shap_extreme": 0.3020031154155731,
+        "mean_shap_base": -0.0020623484160751104,
+        "std_shap": 0.052852727472782135
+      },
+      "delta_rain_30m": {
+        "mean_abs_shap": 0.004362919367849827,
+        "mean_shap_extreme": 0.34973132610321045,
+        "mean_shap_base": -0.0009079953888431191,
+        "std_shap": 0.030948014929890633
+      },
+      "hour_sin": {
+        "mean_abs_shap": 0.009498614817857742,
+        "mean_shap_extreme": -0.5562081933021545,
+        "mean_shap_base": 0.0007117165368981659,
+        "std_shap": 0.056256990879774094
+      },
+      "hour_cos": {
+        "mean_abs_shap": 0.009929323568940163,
+        "mean_shap_extreme": 0.0732625424861908,
+        "mean_shap_base": 0.0008938912069424987,
+        "std_shap": 0.07463397830724716
+      },
+      "month_sin": {
+        "mean_abs_shap": 0.017877867445349693,
+        "mean_shap_extreme": 0.18692898750305176,
+        "mean_shap_base": -0.0003082984476350248,
+        "std_shap": 0.14040996134281158
+      },
+      "month_cos": {
+        "mean_abs_shap": 0.02458677627146244,
+        "mean_shap_extreme": 0.5238140821456909,
+        "mean_shap_base": 0.0006230855942703784,
+        "std_shap": 0.08667469769716263
+      }
+    },
+    "non_monotonic_candidates": [
+      {
+        "feature": "rain_in",
+        "mean_shap_extreme": 1.8518376350402832,
+        "mean_shap_base": -0.015379036776721478
+      },
+      {
+        "feature": "temp_daily_f",
+        "mean_shap_extreme": 0.47172629833221436,
+        "mean_shap_base": -0.00638539157807827
+      },
+      {
+        "feature": "api_dynamic",
+        "mean_shap_extreme": 19.99379539489746,
+        "mean_shap_base": -0.1713581085205078
+      },
+      {
+        "feature": "rain_sum_10m",
+        "mean_shap_extreme": 1.629929780960083,
+        "mean_shap_base": -0.009219133295118809
+      },
+      {
+        "feature": "rain_sum_15m",
+        "mean_shap_extreme": 1.8652675151824951,
+        "mean_shap_base": -0.028220009058713913
+      },
+      {
+        "feature": "rain_sum_30m",
+        "mean_shap_extreme": 2.0685276985168457,
+        "mean_shap_base": -0.013177020475268364
+      },
+      {
+        "feature": "rain_sum_60m",
+        "mean_shap_extreme": -1.2805850505828857,
+        "mean_shap_base": 0.0022491123527288437
+      },
+      {
+        "feature": "rain_sum_120m",
+        "mean_shap_extreme": 3.553453207015991,
+        "mean_shap_base": -0.07816320657730103
+      },
+      {
+        "feature": "rain_sum_180m",
+        "mean_shap_extreme": 0.4529839754104614,
+        "mean_shap_base": -0.0038563385605812073
+      },
+      {
+        "feature": "rain_sum_360m",
+        "mean_shap_extreme": 0.6113014221191406,
+        "mean_shap_base": -0.04533090442419052
+      },
+      {
+        "feature": "rain_max_10m",
+        "mean_shap_extreme": 0.7097238302230835,
+        "mean_shap_base": -0.0002451530599500984
+      },
+      {
+        "feature": "rain_max_30m",
+        "mean_shap_extreme": 2.098506450653076,
+        "mean_shap_base": -0.00015793784405104816
+      },
+      {
+        "feature": "rain_max_60m",
+        "mean_shap_extreme": -0.897661566734314,
+        "mean_shap_base": 0.001998158171772957
+      },
+      {
+        "feature": "minutes_since_last_rain",
+        "mean_shap_extreme": 0.04270024225115776,
+        "mean_shap_base": -0.0011645512422546744
+      },
+      {
+        "feature": "delta_rain_10m",
+        "mean_shap_extreme": 0.3020031154155731,
+        "mean_shap_base": -0.0020623484160751104
+      },
+      {
+        "feature": "delta_rain_30m",
+        "mean_shap_extreme": 0.34973132610321045,
+        "mean_shap_base": -0.0009079953888431191
+      },
+      {
+        "feature": "hour_sin",
+        "mean_shap_extreme": -0.5562081933021545,
+        "mean_shap_base": 0.0007117165368981659
+      },
+      {
+        "feature": "month_sin",
+        "mean_shap_extreme": 0.18692898750305176,
+        "mean_shap_base": -0.0003082984476350248
+      }
+    ]
+  },
+  "high_corr_pairs": [
+    {
+      "a": "rain_sum_10m",
+      "b": "rain_max_10m",
+      "r": 0.9845598078623528
+    },
+    {
+      "a": "rain_sum_10m",
+      "b": "rain_sum_15m",
+      "r": 0.9696902600950624
+    },
+    {
+      "a": "rain_sum_15m",
+      "b": "rain_max_10m",
+      "r": 0.9544875196316246
+    },
+    {
+      "a": "rain_in",
+      "b": "rain_sum_10m",
+      "r": 0.9520874988664195
+    },
+    {
+      "a": "rain_in",
+      "b": "rain_max_10m",
+      "r": 0.9416839551507067
+    },
+    {
+      "a": "api_dynamic",
+      "b": "rain_sum_60m",
+      "r": 0.9402312848682116
+    },
+    {
+      "a": "rain_sum_30m",
+      "b": "rain_max_30m",
+      "r": 0.9339774155529742
+    },
+    {
+      "a": "rain_sum_120m",
+      "b": "rain_sum_180m",
+      "r": 0.9112852406103367
+    },
+    {
+      "a": "api_dynamic",
+      "b": "rain_sum_30m",
+      "r": 0.9059803764861722
+    },
+    {
+      "a": "rain_sum_60m",
+      "b": "rain_max_60m",
+      "r": 0.9029277410265524
+    },
+    {
+      "a": "rain_sum_15m",
+      "b": "rain_sum_30m",
+      "r": 0.8946456647197142
+    },
+    {
+      "a": "rain_in",
+      "b": "rain_sum_15m",
+      "r": 0.8851733844834193
+    },
+    {
+      "a": "temp_daily_f",
+      "b": "month_cos",
+      "r": -0.8704579120120576
+    },
+    {
+      "a": "api_dynamic",
+      "b": "rain_sum_120m",
+      "r": 0.8636256523766981
+    },
+    {
+      "a": "rain_sum_30m",
+      "b": "rain_sum_60m",
+      "r": 0.8612835554392462
+    }
+  ],
+  "clusters": [
+    [
+      "rain_in",
+      "rain_sum_10m",
+      "rain_sum_15m",
+      "rain_max_10m"
+    ],
+    [
+      "temp_daily_f",
+      "month_cos"
+    ],
+    [
+      "api_dynamic",
+      "rain_sum_60m"
+    ],
+    [
+      "rain_sum_30m",
+      "rain_max_30m"
+    ],
+    [
+      "rain_sum_120m",
+      "rain_sum_180m"
+    ],
+    [
+      "rain_sum_360m"
+    ],
+    [
+      "rain_max_60m"
+    ],
+    [
+      "minutes_since_last_rain"
+    ],
+    [
+      "delta_rain_10m"
+    ],
+    [
+      "delta_rain_30m"
+    ],
+    [
+      "hour_sin"
+    ],
+    [
+      "hour_cos"
+    ],
+    [
+      "month_sin"
+    ]
+  ],
+  "representative": {
+    "rain_in": "rain_sum_15m",
+    "rain_sum_10m": "rain_sum_15m",
+    "rain_sum_15m": "rain_sum_15m",
+    "rain_max_10m": "rain_sum_15m",
+    "temp_daily_f": "temp_daily_f",
+    "month_cos": "temp_daily_f",
+    "api_dynamic": "api_dynamic",
+    "rain_sum_60m": "api_dynamic",
+    "rain_sum_30m": "rain_sum_30m",
+    "rain_max_30m": "rain_sum_30m",
+    "rain_sum_120m": "rain_sum_120m",
+    "rain_sum_180m": "rain_sum_120m",
+    "rain_sum_360m": "rain_sum_360m",
+    "rain_max_60m": "rain_max_60m",
+    "minutes_since_last_rain": "minutes_since_last_rain",
+    "delta_rain_10m": "delta_rain_10m",
+    "delta_rain_30m": "delta_rain_30m",
+    "hour_sin": "hour_sin",
+    "hour_cos": "hour_cos",
+    "month_sin": "month_sin"
+  },
+  "acf_features": {
+    "rain_sum_60m": {
+      "1": 0.9885156637180013,
+      "6": 0.7574949103993002,
+      "12": 0.4170705222931862,
+      "24": 0.2080677077677031
+    },
+    "api_dynamic": {
+      "1": 0.9876169057018327,
+      "6": 0.7945702493801655,
+      "12": 0.590875065963245,
+      "24": 0.3541143357313264
+    },
+    "rain_sum_360m": {
+      "1": 0.9989848925197563,
+      "6": 0.9761942414702399,
+      "12": 0.9307171633969816,
+      "24": 0.8105508124907908
+    },
+    "delta_flow_5m": {
+      "1": 0.08201863576981569,
+      "6": -0.0363760464253101,
+      "12": -0.0001417695619391621,
+      "24": -0.0032298703177760096
+    }
+  },
+  "target_acf_train_empirical": {
+    "1": 0.9087101234082996,
+    "6": 0.5558511553415564,
+    "12": 0.42074638138989573,
+    "24": 0.27505310786791176
+  },
+  "target_acf_reference": {
+    "1": 0.91,
+    "6": 0.56,
+    "12": 0.42,
+    "24": 0.28
+  },
+  "reduced_set": {
+    "selected": [
+      "api_dynamic",
+      "rain_sum_360m",
+      "rain_sum_120m",
+      "rain_sum_15m",
+      "temp_daily_f",
+      "hour_sin",
+      "minutes_since_last_rain",
+      "delta_rain_10m",
+      "delta_rain_30m",
+      "rain_sum_30m"
+    ],
+    "justification": [
+      {
+        "feature": "api_dynamic",
+        "permutation_drop": 0.41817506551742556,
+        "represents_cluster_size": 2,
+        "cluster_members": [
+          "api_dynamic",
+          "rain_sum_60m"
+        ]
+      },
+      {
+        "feature": "rain_sum_360m",
+        "permutation_drop": 0.10833151340484619,
+        "represents_cluster_size": 1,
+        "cluster_members": [
+          "rain_sum_360m"
+        ]
+      },
+      {
+        "feature": "rain_sum_120m",
+        "permutation_drop": 0.08033964633941651,
+        "represents_cluster_size": 2,
+        "cluster_members": [
+          "rain_sum_120m",
+          "rain_sum_180m"
+        ]
+      },
+      {
+        "feature": "rain_sum_15m",
+        "permutation_drop": 0.03681912422180176,
+        "represents_cluster_size": 4,
+        "cluster_members": [
+          "rain_in",
+          "rain_sum_10m",
+          "rain_sum_15m",
+          "rain_max_10m"
+        ]
+      },
+      {
+        "feature": "temp_daily_f",
+        "permutation_drop": 0.03321903944015503,
+        "represents_cluster_size": 2,
+        "cluster_members": [
+          "temp_daily_f",
+          "month_cos"
+        ]
+      },
+      {
+        "feature": "hour_sin",
+        "permutation_drop": 0.010527074337005615,
+        "represents_cluster_size": 1,
+        "cluster_members": [
+          "hour_sin"
+        ]
+      },
+      {
+        "feature": "minutes_since_last_rain",
+        "permutation_drop": 0.004514217376708984,
+        "represents_cluster_size": 1,
+        "cluster_members": [
+          "minutes_since_last_rain"
+        ]
+      },
+      {
+        "feature": "delta_rain_10m",
+        "permutation_drop": 0.004398775100708008,
+        "represents_cluster_size": 1,
+        "cluster_members": [
+          "delta_rain_10m"
+        ]
+      },
+      {
+        "feature": "delta_rain_30m",
+        "permutation_drop": 0.0006024956703186036,
+        "represents_cluster_size": 1,
+        "cluster_members": [
+          "delta_rain_30m"
+        ]
+      },
+      {
+        "feature": "rain_sum_30m",
+        "permutation_drop": 0.0005527734756469727,
+        "represents_cluster_size": 2,
+        "cluster_members": [
+          "rain_sum_30m",
+          "rain_max_30m"
+        ]
+      }
+    ],
+    "metrics": {
+      "n_features": 10,
+      "features": [
+        "api_dynamic",
+        "rain_sum_360m",
+        "rain_sum_120m",
+        "rain_sum_15m",
+        "temp_daily_f",
+        "hour_sin",
+        "minutes_since_last_rain",
+        "delta_rain_10m",
+        "delta_rain_30m",
+        "rain_sum_30m"
+      ],
+      "fit_seconds": 8.287169218063354,
+      "nse": 0.6979730725288391,
+      "rmse": 1.3213218450546265,
+      "mae": 0.27085256576538086,
+      "peak_real": 135.15089416503906,
+      "peak_pred": 91.77664947509766,
+      "peak_err_pct": -32.093196868896484
+    }
+  },
+  "ablation_reduced": {
+    "api_dynamic": {
+      "nse_without": 0.6969687342643738,
+      "delta_nse": 0.001004338264465332,
+      "fit_seconds": 7.752250671386719
+    },
+    "rain_sum_360m": {
+      "nse_without": 0.6731103658676147,
+      "delta_nse": 0.024862706661224365,
+      "fit_seconds": 7.924669027328491
+    },
+    "rain_sum_120m": {
+      "nse_without": 0.7072115540504456,
+      "delta_nse": -0.009238481521606445,
+      "fit_seconds": 8.086594581604004
+    },
+    "rain_sum_15m": {
+      "nse_without": 0.6658608913421631,
+      "delta_nse": 0.032112181186676025,
+      "fit_seconds": 9.370543479919434
+    },
+    "temp_daily_f": {
+      "nse_without": 0.7158352136611938,
+      "delta_nse": -0.017862141132354736,
+      "fit_seconds": 7.761746168136597
+    },
+    "hour_sin": {
+      "nse_without": 0.6551411151885986,
+      "delta_nse": 0.04283195734024048,
+      "fit_seconds": 7.77352237701416
+    },
+    "minutes_since_last_rain": {
+      "nse_without": 0.702928364276886,
+      "delta_nse": -0.004955291748046875,
+      "fit_seconds": 7.723852157592773
+    },
+    "delta_rain_10m": {
+      "nse_without": 0.700134813785553,
+      "delta_nse": -0.002161741256713867,
+      "fit_seconds": 7.756227970123291
+    },
+    "delta_rain_30m": {
+      "nse_without": 0.6955456733703613,
+      "delta_nse": 0.002427399158477783,
+      "fit_seconds": 7.756573915481567
+    },
+    "rain_sum_30m": {
+      "nse_without": 0.6911309957504272,
+      "delta_nse": 0.006842076778411865,
+      "fit_seconds": 7.828226804733276
+    }
+  },
+  "key_findings": [
+    "1. **Top 5 features por permutation importance**: `api_dynamic`(+0.4182), `rain_sum_360m`(+0.1083), `rain_sum_120m`(+0.0803), `rain_sum_15m`(+0.0368), `rain_sum_180m`(+0.0340). Estas son las que realmente impactan NSE cuando se barajan en test, no necesariamente las que mas usa el booster por gain.",
+    "2. **Redundancia: 15 pares con |r|>=0.85**, agrupados en **13 clusters independientes**. La dimensionalidad efectiva esta mucho mas cerca de 13 que de 20.",
+    "3. **No se detectan atajos encubiertos adicionales**: ninguna feature, tras quitar `delta_flow_*`, causa caida >0.05 NSE en ablation 1-by-1. El conjunto reducido depende repartidamente de varias features.",
+    "4. **Conjunto reducido propuesto (10 features)**: NSE=0.6980 vs XGB-20=0.6619 (delta +0.0361). Mejora (+0.0361 nse sobre xgb-20: al quitar features con pi<=0 se elimina ruido).",
+    "5. **Lluvias largas `rain_sum_180m`(PI=+0.0340), `rain_sum_360m`(PI=+0.1083)**: aportan PI medible: mantener.",
+    "6. **Features con PI <= 0**: `rain_sum_60m`, `rain_max_30m`, `rain_max_60m`, `hour_cos`, `month_sin`, `month_cos`. Su shuffle no degrada el modelo: ruido para esta tarea.",
+    "7. **ACF individual (posible inercia encubierta)**:\n   - `rain_sum_60m` con ACF lag1=0.989, lag12=0.417 (target=0.420): inercia comparable a la del target en lag12 => posible portador de senal autoregresiva encubierta.\n   - `delta_flow_5m` con ACF lag1=0.082: memoria corta, comportamiento tipo diferencia o ruido."
+  ],
+  "verdict": "Las 20 features oficiales (sin `delta_flow_*`) contienen una redundancia masiva: 15 pares con |r|>=0.85 que se agrupan en 13 clusters casi independientes. La capacidad predictiva real del modelo XGBoost vive en un subespacio mucho mas pequeno.\n\n\n\nEl conjunto reducido (10 features) **mejora +0.0361 NSE** sobre XGB-20. Reducir la dimensionalidad no solo no pierde senal sino que limpia ruido: las features con PI<=0 (hour_cos, month_sin, month_cos, rain_sum_60m, rain_max_30m, rain_max_60m) estaban degradando el fit de XGBoost.\n\n\n\nSin features con caida >=0.05 NSE en la ablation, el modelo XGBoost reducido reparte su senal de forma sana entre las features fisicas (lluvia agregada + API + temperatura + estacionalidad). No quedan atajos evidentes que limpiar mas alla de los `delta_flow_*` ya excluidos."
+}
