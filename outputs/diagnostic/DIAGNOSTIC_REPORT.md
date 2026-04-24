@@ -251,14 +251,44 @@ Solo los caminos para los que tengo evidencia de S1-S6.
 
 Cada paso indica archivos concretos y comando o entorno.
 
-### 7.1 Paso 1 — Resolver discrepancia NSE TCN v1 (1-2h, local)
+### 7.1 Paso 1 — Resuelta discrepancia NSE TCN v1: cifra oficial = **0.86** [HECHO]
 
-**Objetivo**: fijar la cifra de referencia del v1 antes de comparar contra el nuevo modelo.
+**Resultado**: la re-ejecución de `scripts/diagnostic/s4_horizon_ceiling.py` (log completo en `outputs/diagnostic/logs/s4_rerun.log`, artefactos `outputs/diagnostic/S4_horizon_ceiling.{json,md}` regenerados) reproduce **NSE H=1 sinSF = 0.8615** sobre el test alineado (n=165,222). La cifra coincide con `evaluate_local.py` (0.8614, n=165,223) hasta la tercera decimal, por lo que se cierra la discrepancia y se adopta **NSE = 0.86 como cifra oficial** del TCN v1 sinSF a H=1.
 
-- Crear `scripts/diagnostic/s_audit_v1_nse.py` que ejecute la misma carga de pesos y features que `evaluate_local.py` y la misma que `s4_horizon_ceiling.py`, instrumentando: (a) índices del test usados, (b) threshold del switch duro, (c) clipping a 0, (d) denormalización (log1p+zscore vs zscore solo), (e) shape de `y_pred`.
-- Documentar el origen de la diferencia 0.86 vs 0.74 en `outputs/diagnostic/V1_NSE_RESOLUTION.md`.
-- Adoptar la cifra alineada (la que use `seq_length+horizon-1` offset) como referencia oficial.
-- Commit: `diagnostic: resuelta discrepancia NSE v1, cifra oficial=X.XX`.
+**Cifras oficiales alineadas** (rerun S4 del 2026-04-22):
+
+| h | min | NSE TCN v1 sinSF | Pico err % | NSE `evaluate_local.py` | Delta vs AR(12) |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 5 | **0.8615** | +42.6 | 0.8614 | +0.0342 (AR12=0.8273) |
+| 3 | 15 | 0.4697 | +121.2 | 0.4714 | −0.0388 (AR12=0.5085) |
+| 6 | 30 | −1.2039 | +38.9 | −1.2121 | −1.5209 (AR12=0.3170) |
+
+**Auditoría de la discrepancia 0.74 vs 0.86** (basada en comparación de la S4 antigua commit `68b038d` vs el rerun):
+
+- Script sin cambios (`git diff 68b038d..HEAD -- scripts/diagnostic/s4_horizon_ceiling.py` vacío), pesos sin cambios (`MC-CL-005/Pesos 13-04-2026/modelo_H1_sinSF_*` fechados 2026-04-13), caché `outputs/cache/df_with_features.parquet` ya existía (ctime 2026-04-20) antes de la primera ejecución de S4.
+- **Invariantes que coinciden exactamente** entre ambos runs: `n_test=165,222`, `test_index_first=936,741`, `test_index_last=1,101,962`, `peak_real=135.1509`, `peak_pred=192.7817`, `peak_err_pct=+42.6418%`, `cls_prob_pct_above_thr=12.198738666763505%`, `cls_prob_mean≈0.105087` (difieren en la 9ª decimal, float32 noise). Inferencia idéntica en el pico y en el recuento de activaciones del clasificador; la varianza global del target (`sum(y-mean)^2 ≈ 955,079`) también coincide.
+- **Lo que cambia** son los SSE residuales por bucket — p. ej. en H=1: Moderado 74,840 → 37,261; Extremo 99,101 → 46,031; Base 14,936 → 18,155. Esto desplaza NSE de 0.7388 a 0.8615 sin que peak ni cls_prob se vean afectados. No hay explicación reproducible posterior (código/datos/pesos idénticos), por lo que el run antiguo queda marcado como **no reproducible** y descartado como fuente de verdad.
+- La cifra del rerun (0.8615) es la que se corresponde con el mismo pipeline de `evaluate_local.py` (0.8614) — se adopta como oficial. El histórico del JSON anterior queda en el git log (commit `68b038d`) a efectos de trazabilidad.
+
+**Implicaciones para el resto del reporte** (no se reescriben aquí por instrucción explícita, el lector debe tratar §7.1 como la referencia vigente):
+
+- §2.2 "Valor sobre test alineado (S4 reproducción): NSE=0.7388" → cifra obsoleta; la reproducible es 0.8615.
+- §2.3, tabla: fila "TCN v1 sinSF (S4 reproducción) | 0.739 | 0.293 | −1.30" → valores obsoletos; lectura vigente: 0.8615 / 0.4697 / −1.2039.
+- §3.4, tabla: "NSE máx defendible H=1 ~0.83" sube a ~0.86 con la cifra oficial, pero no invalida el veredicto porque TCN v1 sigue dentro del orden del AR(12) y del 2ρ−1. Oráculos parciales: deltas caen (p. ej. oráculo Extremo ahora +0.048 en vez de +0.104) porque la base sube; la jerarquía relativa entre buckets se conserva.
+- §6 "Recomendación única": la comparativa pasa a ser **TCN v1 = 0.8615 vs AR(12) = 0.8273 → +0.034 NSE**, no ±0.03 según cómo se calcule. El TCN v1 **sí supera** al AR(12) en H=1 por un margen modesto; en H=3 y H=6 **sigue por debajo** de AR(12) (0.47 < 0.51 y −1.20 < 0.32). El veredicto sobre escoger XGBoost+lags como modelo principal no cambia: el argumento dominante era (a) bugs estructurales S1 inabordables sin rediseñar la loss, y (b) atajo `delta_flow` sin el cual NSE colapsa a −0.17 (iter16). Ambas siguen en pie.
+
+**Artefactos y comando de reproducción**:
+
+```bash
+python scripts/diagnostic/s4_horizon_ceiling.py > outputs/diagnostic/logs/s4_rerun.log 2>&1
+```
+
+- JSON: `outputs/diagnostic/S4_horizon_ceiling.json` (sobrescrito por el rerun).
+- MD: `outputs/diagnostic/S4_horizon_ceiling.md` (sobrescrito por el rerun).
+- Figura: `outputs/figures/diagnostic/s4_horizon_ceiling.png` (sobrescrito por el rerun).
+- Log: `outputs/diagnostic/logs/s4_rerun.log`.
+
+**Commit sugerido**: `diagnostic: rerun S4, NSE v1 H=1 oficial=0.86 (reconciliado con evaluate_local)`.
 
 ### 7.2 Paso 2 — Crear rama iter17 y borrador de modelo XGBoost+lags (medio día, local)
 
