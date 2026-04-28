@@ -1,0 +1,3810 @@
+{
+  "meta": {
+    "iter": 18,
+    "branch": "iter18-xgboost-classifier",
+    "problem_formulation": "max(stormflow[t+1..t+h]) >= U",
+    "split": {
+      "seq_length": 72,
+      "train_end_idx": 771374,
+      "val_end_idx": 936669
+    },
+    "xgb_params": {
+      "n_estimators": 500,
+      "max_depth": 6,
+      "learning_rate": 0.05,
+      "subsample": 0.8,
+      "tree_method": "hist",
+      "objective": "binary:logistic",
+      "eval_metric": "aucpr",
+      "n_jobs": -1,
+      "random_state": 42
+    },
+    "early_stopping_rounds": 20,
+    "features_10": [
+      "api_dynamic",
+      "rain_sum_360m",
+      "rain_sum_120m",
+      "rain_sum_15m",
+      "temp_daily_f",
+      "hour_sin",
+      "minutes_since_last_rain",
+      "delta_rain_10m",
+      "delta_rain_30m",
+      "rain_sum_30m"
+    ],
+    "variants": [
+      {
+        "name": "h6_u25",
+        "horizon": 6,
+        "threshold_mgd": 25.0
+      },
+      {
+        "name": "h6_u50",
+        "horizon": 6,
+        "threshold_mgd": 50.0
+      },
+      {
+        "name": "h12_u25",
+        "horizon": 12,
+        "threshold_mgd": 25.0
+      },
+      {
+        "name": "h12_u50",
+        "horizon": 12,
+        "threshold_mgd": 50.0
+      }
+    ]
+  },
+  "results": {
+    "h6_u25": {
+      "config": {
+        "horizon": 6,
+        "threshold_mgd": 25.0,
+        "lags": 6,
+        "features": [
+          "api_dynamic",
+          "rain_sum_360m",
+          "rain_sum_120m",
+          "rain_sum_15m",
+          "temp_daily_f",
+          "hour_sin",
+          "minutes_since_last_rain",
+          "delta_rain_10m",
+          "delta_rain_30m",
+          "rain_sum_30m"
+        ],
+        "seq_length": 72,
+        "n_features_input": 16
+      },
+      "fit_seconds": 7.045573711395264,
+      "best_iteration": 99,
+      "prevalence_train": 0.00560740151069231,
+      "scale_pos_weight": 177.3357225433526,
+      "n_train": 771302,
+      "n_val": 165223,
+      "n_test": 165217,
+      "operational_threshold": 0.5478991866111755,
+      "validation_panel": {
+        "class_distribution": {
+          "n_total": 165223,
+          "n_positives": 754,
+          "n_negatives": 164469,
+          "prevalence": 0.004563529290716184
+        },
+        "default_threshold_metrics": {
+          "threshold": 0.5,
+          "precision": 0.12232125924521145,
+          "recall": 0.8554376657824934,
+          "f1": 0.21403683424589348,
+          "accuracy": 0.9713296574932061,
+          "tp": 645,
+          "fp": 4628,
+          "tn": 159841,
+          "fn": 109
+        },
+        "operational_threshold_metrics": {
+          "threshold": 0.5478991866111755,
+          "precision": 0.1348905723905724,
+          "recall": 0.850132625994695,
+          "f1": 0.23283690519433345,
+          "accuracy": 0.9744345520902054,
+          "tp": 641,
+          "fp": 4111,
+          "tn": 160358,
+          "fn": 113
+        },
+        "threshold_free_metrics": {
+          "roc_auc": 0.9711430506209252,
+          "auc_pr": 0.6256335203653773,
+          "brier_score": 0.024702049957546376
+        },
+        "lead_time": {
+          "available": false,
+          "threshold_operational": 0.5478991866111755,
+          "threshold_mgd": null,
+          "n_positive_events": 0,
+          "n_events_with_alert": 0,
+          "mean_minutes": null,
+          "median_minutes": null,
+          "p10_minutes": null,
+          "p90_minutes": null,
+          "per_event": []
+        },
+        "pr_curve": [
+          {
+            "threshold": 0.0030353348702192307,
+            "precision": 0.004563529290716184,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.005514977499842644,
+            "precision": 0.006634462247798045,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.006829127203673124,
+            "precision": 0.007557357634637388,
+            "recall": 0.9986737400530504
+          },
+          {
+            "threshold": 0.010148760862648487,
+            "precision": 0.008251873931530268,
+            "recall": 0.9986737400530504
+          },
+          {
+            "threshold": 0.013055330142378807,
+            "precision": 0.008904508055611621,
+            "recall": 0.9946949602122016
+          },
+          {
+            "threshold": 0.015595602802932262,
+            "precision": 0.009546081889280786,
+            "recall": 0.9907161803713528
+          },
+          {
+            "threshold": 0.018889835104346275,
+            "precision": 0.010313131592790499,
+            "recall": 0.9880636604774535
+          },
+          {
+            "threshold": 0.02321082353591919,
+            "precision": 0.011138539346137637,
+            "recall": 0.9814323607427056
+          },
+          {
+            "threshold": 0.02783234417438507,
+            "precision": 0.012180811503181555,
+            "recall": 0.9774535809018567
+          },
+          {
+            "threshold": 0.033171672374010086,
+            "precision": 0.01329981052324734,
+            "recall": 0.9681697612732095
+          },
+          {
+            "threshold": 0.04029969498515129,
+            "precision": 0.014803668381560485,
+            "recall": 0.9655172413793104
+          },
+          {
+            "threshold": 0.04962046071887016,
+            "precision": 0.016755644918995123,
+            "recall": 0.9615384615384616
+          },
+          {
+            "threshold": 0.0634191706776619,
+            "precision": 0.019087004930809608,
+            "recall": 0.9549071618037135
+          },
+          {
+            "threshold": 0.0829598605632782,
+            "precision": 0.022100473581576748,
+            "recall": 0.946949602122016
+          },
+          {
+            "threshold": 0.11150085180997849,
+            "precision": 0.02664452579537306,
+            "recall": 0.9363395225464191
+          },
+          {
+            "threshold": 0.1479669213294983,
+            "precision": 0.03411804844762879,
+            "recall": 0.9283819628647215
+          },
+          {
+            "threshold": 0.20165497064590454,
+            "precision": 0.04708458800985491,
+            "recall": 0.9124668435013262
+          },
+          {
+            "threshold": 0.30311208963394165,
+            "precision": 0.07358117025956885,
+            "recall": 0.8872679045092838
+          },
+          {
+            "threshold": 0.5920275449752808,
+            "precision": 0.1453050034270048,
+            "recall": 0.843501326259947
+          },
+          {
+            "threshold": 0.996368408203125,
+            "precision": 1.0,
+            "recall": 0.010610079575596816
+          }
+        ],
+        "calibration": [
+          {
+            "bin": 0,
+            "n": 16532,
+            "pred_mean": 0.0033283310665411232,
+            "observed_freq": 0.0,
+            "pred_min": 0.0030353348702192307,
+            "pred_max": 0.003427651943638921
+          },
+          {
+            "bin": 1,
+            "n": 16534,
+            "pred_mean": 0.003696607115640299,
+            "observed_freq": 0.0,
+            "pred_min": 0.0034277141094207764,
+            "pred_max": 0.004506259690970182
+          },
+          {
+            "bin": 2,
+            "n": 16509,
+            "pred_mean": 0.004981031857115699,
+            "observed_freq": 0.0,
+            "pred_min": 0.0045072780922055244,
+            "pred_max": 0.005386833567172289
+          },
+          {
+            "bin": 3,
+            "n": 16533,
+            "pred_mean": 0.005985472184150009,
+            "observed_freq": 6.048509042521019e-05,
+            "pred_min": 0.0053870789706707,
+            "pred_max": 0.006917621940374374
+          },
+          {
+            "bin": 4,
+            "n": 16504,
+            "pred_mean": 0.01022514837760825,
+            "observed_freq": 0.00018177411536597187,
+            "pred_min": 0.006917778868228197,
+            "pred_max": 0.013660810887813568
+          },
+          {
+            "bin": 5,
+            "n": 16522,
+            "pred_mean": 0.01796673217370309,
+            "observed_freq": 0.0006052536012589275,
+            "pred_min": 0.013662366196513176,
+            "pred_max": 0.023494519293308258
+          },
+          {
+            "bin": 6,
+            "n": 16522,
+            "pred_mean": 0.030656119242500824,
+            "observed_freq": 0.000726304321510713,
+            "pred_min": 0.023498130962252617,
+            "pred_max": 0.039801765233278275
+          },
+          {
+            "bin": 7,
+            "n": 16522,
+            "pred_mean": 0.056029503435417766,
+            "observed_freq": 0.0008473550417624985,
+            "pred_min": 0.03980465605854988,
+            "pred_max": 0.08032892644405365
+          },
+          {
+            "bin": 8,
+            "n": 16524,
+            "pred_mean": 0.12376930623528773,
+            "observed_freq": 0.001270878721859114,
+            "pred_min": 0.0803346037864685,
+            "pred_max": 0.1818559765815735
+          },
+          {
+            "bin": 9,
+            "n": 16521,
+            "pred_mean": 0.43886813602560937,
+            "observed_freq": 0.04194661340112584,
+            "pred_min": 0.18188418447971344,
+            "pred_max": 0.996368408203125
+          }
+        ]
+      },
+      "test_panel": {
+        "class_distribution": {
+          "n_total": 165217,
+          "n_positives": 683,
+          "n_negatives": 164534,
+          "prevalence": 0.004133957159372219
+        },
+        "default_threshold_metrics": {
+          "threshold": 0.5,
+          "precision": 0.09379331587863854,
+          "recall": 0.8916544655929722,
+          "f1": 0.1697324414715719,
+          "accuracy": 0.9639383356434266,
+          "tp": 609,
+          "fp": 5884,
+          "tn": 158650,
+          "fn": 74
+        },
+        "operational_threshold_metrics": {
+          "threshold": 0.5478991866111755,
+          "precision": 0.101889338731444,
+          "recall": 0.8843338213762811,
+          "f1": 0.18272576009680835,
+          "accuracy": 0.9672975541257861,
+          "tp": 604,
+          "fp": 5324,
+          "tn": 159210,
+          "fn": 79
+        },
+        "threshold_free_metrics": {
+          "roc_auc": 0.9805894097889775,
+          "auc_pr": 0.5841831791564164,
+          "brier_score": 0.030216922015643882
+        },
+        "lead_time": {
+          "available": true,
+          "threshold_operational": 0.5478991866111755,
+          "threshold_mgd": 25.0,
+          "n_positive_events": 71,
+          "n_events_with_alert": 53,
+          "mean_minutes": 23.962264150943398,
+          "median_minutes": 25.0,
+          "p10_minutes": 15.0,
+          "p90_minutes": 30.0,
+          "per_event": [
+            {
+              "event_id": 0,
+              "start_index": 772,
+              "end_index": 778,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-07-09 23:45:00",
+              "first_exceedance_ts": "2024-07-10 00:15:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 1,
+              "start_index": 2697,
+              "end_index": 2704,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-07-16 16:30:00",
+              "first_exceedance_ts": "2024-07-16 16:40:00",
+              "lead_time_minutes": 10.0
+            },
+            {
+              "event_id": 2,
+              "start_index": 2978,
+              "end_index": 2987,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-07-17 15:50:00",
+              "first_exceedance_ts": "2024-07-17 16:05:00",
+              "lead_time_minutes": 15.0
+            },
+            {
+              "event_id": 3,
+              "start_index": 4997,
+              "end_index": 5003,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-07-24 15:55:00",
+              "first_exceedance_ts": "2024-07-24 16:20:00",
+              "lead_time_minutes": 25.0
+            },
+            {
+              "event_id": 4,
+              "start_index": 6107,
+              "end_index": 6122,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-07-28 12:20:00",
+              "first_exceedance_ts": "2024-07-28 12:50:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 5,
+              "start_index": 6905,
+              "end_index": 6910,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 6,
+              "start_index": 11631,
+              "end_index": 11637,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-08-16 16:55:00",
+              "first_exceedance_ts": "2024-08-16 17:10:00",
+              "lead_time_minutes": 15.0
+            },
+            {
+              "event_id": 7,
+              "start_index": 15636,
+              "end_index": 15641,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 8,
+              "start_index": 22825,
+              "end_index": 22836,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-09-24 13:35:00",
+              "first_exceedance_ts": "2024-09-24 14:00:00",
+              "lead_time_minutes": 25.0
+            },
+            {
+              "event_id": 9,
+              "start_index": 23682,
+              "end_index": 23699,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-09-27 12:55:00",
+              "first_exceedance_ts": "2024-09-27 13:25:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 10,
+              "start_index": 23707,
+              "end_index": 23732,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-09-27 15:00:00",
+              "first_exceedance_ts": "2024-09-27 15:30:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 11,
+              "start_index": 24463,
+              "end_index": 24469,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-09-30 06:20:00",
+              "first_exceedance_ts": "2024-09-30 06:30:00",
+              "lead_time_minutes": 10.0
+            },
+            {
+              "event_id": 12,
+              "start_index": 36273,
+              "end_index": 36280,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-11-10 06:10:00",
+              "first_exceedance_ts": "2024-11-10 06:40:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 13,
+              "start_index": 37333,
+              "end_index": 37338,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 14,
+              "start_index": 37386,
+              "end_index": 37391,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 15,
+              "start_index": 37397,
+              "end_index": 37404,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-11-14 03:50:00",
+              "first_exceedance_ts": "2024-11-14 04:20:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 16,
+              "start_index": 38853,
+              "end_index": 38860,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-11-19 05:20:00",
+              "first_exceedance_ts": "2024-11-19 05:40:00",
+              "lead_time_minutes": 20.0
+            },
+            {
+              "event_id": 17,
+              "start_index": 44551,
+              "end_index": 44556,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 18,
+              "start_index": 50309,
+              "end_index": 50341,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-12-28 23:50:00",
+              "first_exceedance_ts": "2024-12-29 00:20:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 19,
+              "start_index": 50343,
+              "end_index": 50348,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 20,
+              "start_index": 61473,
+              "end_index": 61479,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-02-05 18:30:00",
+              "first_exceedance_ts": "2025-02-05 18:40:00",
+              "lead_time_minutes": 10.0
+            },
+            {
+              "event_id": 21,
+              "start_index": 64420,
+              "end_index": 64445,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-02-15 23:45:00",
+              "first_exceedance_ts": "2025-02-16 00:15:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 22,
+              "start_index": 64454,
+              "end_index": 64462,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-02-16 02:35:00",
+              "first_exceedance_ts": "2025-02-16 03:05:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 23,
+              "start_index": 67599,
+              "end_index": 67604,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 24,
+              "start_index": 72279,
+              "end_index": 72291,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-03-15 06:45:00",
+              "first_exceedance_ts": "2025-03-15 07:10:00",
+              "lead_time_minutes": 25.0
+            },
+            {
+              "event_id": 25,
+              "start_index": 74717,
+              "end_index": 74722,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 26,
+              "start_index": 76758,
+              "end_index": 76766,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-03-30 19:55:00",
+              "first_exceedance_ts": "2025-03-30 20:25:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 27,
+              "start_index": 77664,
+              "end_index": 77674,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-04-02 23:25:00",
+              "first_exceedance_ts": "2025-04-02 23:55:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 28,
+              "start_index": 77923,
+              "end_index": 77951,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-04-03 21:00:00",
+              "first_exceedance_ts": "2025-04-03 21:30:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 29,
+              "start_index": 78281,
+              "end_index": 78286,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 30,
+              "start_index": 81012,
+              "end_index": 81019,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-04-14 14:25:00",
+              "first_exceedance_ts": "2025-04-14 14:55:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 31,
+              "start_index": 83885,
+              "end_index": 83894,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-04-24 14:00:00",
+              "first_exceedance_ts": "2025-04-24 14:20:00",
+              "lead_time_minutes": 20.0
+            },
+            {
+              "event_id": 32,
+              "start_index": 84199,
+              "end_index": 84208,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-04-25 16:00:00",
+              "first_exceedance_ts": "2025-04-25 16:30:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 33,
+              "start_index": 85373,
+              "end_index": 85381,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-04-29 18:00:00",
+              "first_exceedance_ts": "2025-04-29 18:20:00",
+              "lead_time_minutes": 20.0
+            },
+            {
+              "event_id": 34,
+              "start_index": 85883,
+              "end_index": 85890,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-05-01 12:20:00",
+              "first_exceedance_ts": "2025-05-01 12:50:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 35,
+              "start_index": 86226,
+              "end_index": 86232,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-05-02 16:55:00",
+              "first_exceedance_ts": "2025-05-02 17:25:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 36,
+              "start_index": 91285,
+              "end_index": 91290,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 37,
+              "start_index": 91296,
+              "end_index": 91302,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-05-20 07:25:00",
+              "first_exceedance_ts": "2025-05-20 07:55:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 38,
+              "start_index": 94176,
+              "end_index": 94187,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-05-30 07:25:00",
+              "first_exceedance_ts": "2025-05-30 07:55:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 39,
+              "start_index": 96340,
+              "end_index": 96348,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-06-06 19:45:00",
+              "first_exceedance_ts": "2025-06-06 20:15:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 40,
+              "start_index": 96673,
+              "end_index": 96679,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-06-07 23:35:00",
+              "first_exceedance_ts": "2025-06-08 00:00:00",
+              "lead_time_minutes": 25.0
+            },
+            {
+              "event_id": 41,
+              "start_index": 96810,
+              "end_index": 96816,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-06-08 10:55:00",
+              "first_exceedance_ts": "2025-06-08 11:25:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 42,
+              "start_index": 99289,
+              "end_index": 99296,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-06-17 01:30:00",
+              "first_exceedance_ts": "2025-06-17 02:00:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 43,
+              "start_index": 99775,
+              "end_index": 99783,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-06-18 18:15:00",
+              "first_exceedance_ts": "2025-06-18 18:30:00",
+              "lead_time_minutes": 15.0
+            },
+            {
+              "event_id": 44,
+              "start_index": 107500,
+              "end_index": 107507,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-15 13:55:00",
+              "first_exceedance_ts": "2025-07-15 14:15:00",
+              "lead_time_minutes": 20.0
+            },
+            {
+              "event_id": 45,
+              "start_index": 107772,
+              "end_index": 107777,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 46,
+              "start_index": 108142,
+              "end_index": 108154,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-17 19:30:00",
+              "first_exceedance_ts": "2025-07-17 19:45:00",
+              "lead_time_minutes": 15.0
+            },
+            {
+              "event_id": 47,
+              "start_index": 108316,
+              "end_index": 108323,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-18 09:45:00",
+              "first_exceedance_ts": "2025-07-18 10:15:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 48,
+              "start_index": 108664,
+              "end_index": 108671,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-19 15:00:00",
+              "first_exceedance_ts": "2025-07-19 15:15:00",
+              "lead_time_minutes": 15.0
+            },
+            {
+              "event_id": 49,
+              "start_index": 108944,
+              "end_index": 108954,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-20 14:20:00",
+              "first_exceedance_ts": "2025-07-20 14:35:00",
+              "lead_time_minutes": 15.0
+            },
+            {
+              "event_id": 50,
+              "start_index": 108992,
+              "end_index": 109000,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-20 18:10:00",
+              "first_exceedance_ts": "2025-07-20 18:35:00",
+              "lead_time_minutes": 25.0
+            },
+            {
+              "event_id": 51,
+              "start_index": 110990,
+              "end_index": 110996,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-27 16:40:00",
+              "first_exceedance_ts": "2025-07-27 17:05:00",
+              "lead_time_minutes": 25.0
+            },
+            {
+              "event_id": 52,
+              "start_index": 111195,
+              "end_index": 111204,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-28 10:00:00",
+              "first_exceedance_ts": "2025-07-28 10:10:00",
+              "lead_time_minutes": 10.0
+            },
+            {
+              "event_id": 53,
+              "start_index": 112039,
+              "end_index": 112048,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-31 08:15:00",
+              "first_exceedance_ts": "2025-07-31 08:30:00",
+              "lead_time_minutes": 15.0
+            },
+            {
+              "event_id": 54,
+              "start_index": 115628,
+              "end_index": 115635,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-08-12 19:15:00",
+              "first_exceedance_ts": "2025-08-12 19:35:00",
+              "lead_time_minutes": 20.0
+            },
+            {
+              "event_id": 55,
+              "start_index": 117600,
+              "end_index": 117614,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-08-19 15:30:00",
+              "first_exceedance_ts": "2025-08-19 15:55:00",
+              "lead_time_minutes": 25.0
+            },
+            {
+              "event_id": 56,
+              "start_index": 122043,
+              "end_index": 122048,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 57,
+              "start_index": 127445,
+              "end_index": 127452,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-09-22 19:50:00",
+              "first_exceedance_ts": "2025-09-22 20:20:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 58,
+              "start_index": 128269,
+              "end_index": 128276,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-09-25 16:35:00",
+              "first_exceedance_ts": "2025-09-25 17:00:00",
+              "lead_time_minutes": 25.0
+            },
+            {
+              "event_id": 59,
+              "start_index": 131555,
+              "end_index": 131560,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 60,
+              "start_index": 135061,
+              "end_index": 135067,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-10-19 06:45:00",
+              "first_exceedance_ts": "2025-10-19 07:00:00",
+              "lead_time_minutes": 15.0
+            },
+            {
+              "event_id": 61,
+              "start_index": 135111,
+              "end_index": 135116,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 62,
+              "start_index": 140572,
+              "end_index": 140577,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 63,
+              "start_index": 143721,
+              "end_index": 143726,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 64,
+              "start_index": 143733,
+              "end_index": 143739,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-11-18 09:15:00",
+              "first_exceedance_ts": "2025-11-18 09:40:00",
+              "lead_time_minutes": 25.0
+            },
+            {
+              "event_id": 65,
+              "start_index": 143743,
+              "end_index": 143762,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-11-18 10:00:00",
+              "first_exceedance_ts": "2025-11-18 10:30:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 66,
+              "start_index": 143833,
+              "end_index": 143845,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-11-18 17:50:00",
+              "first_exceedance_ts": "2025-11-18 18:00:00",
+              "lead_time_minutes": 10.0
+            },
+            {
+              "event_id": 67,
+              "start_index": 152497,
+              "end_index": 152502,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 68,
+              "start_index": 152507,
+              "end_index": 152513,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-12-18 20:20:00",
+              "first_exceedance_ts": "2025-12-18 20:50:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 69,
+              "start_index": 155405,
+              "end_index": 155412,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-12-28 21:55:00",
+              "first_exceedance_ts": "2025-12-28 22:20:00",
+              "lead_time_minutes": 25.0
+            },
+            {
+              "event_id": 70,
+              "start_index": 158683,
+              "end_index": 158688,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            }
+          ]
+        },
+        "pr_curve": [
+          {
+            "threshold": 0.0032660674769431353,
+            "precision": 0.004133957159372219,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.0057015856727957726,
+            "precision": 0.005830106258388258,
+            "recall": 0.9985358711566618
+          },
+          {
+            "threshold": 0.007047329563647509,
+            "precision": 0.006562045972808883,
+            "recall": 0.9985358711566618
+          },
+          {
+            "threshold": 0.010334881022572517,
+            "precision": 0.007198800903544513,
+            "recall": 0.9985358711566618
+          },
+          {
+            "threshold": 0.013800380751490593,
+            "precision": 0.007771932026979218,
+            "recall": 0.9970717423133236
+          },
+          {
+            "threshold": 0.017130171880126,
+            "precision": 0.00832630304808715,
+            "recall": 0.9970717423133236
+          },
+          {
+            "threshold": 0.0211971253156662,
+            "precision": 0.008950901671712518,
+            "recall": 0.9956076134699854
+          },
+          {
+            "threshold": 0.02534876950085163,
+            "precision": 0.009792576735036307,
+            "recall": 0.9912152269399708
+          },
+          {
+            "threshold": 0.030177854001522064,
+            "precision": 0.010660442818393994,
+            "recall": 0.9897510980966325
+          },
+          {
+            "threshold": 0.03585914149880409,
+            "precision": 0.011751616716500938,
+            "recall": 0.9897510980966325
+          },
+          {
+            "threshold": 0.043266661465168,
+            "precision": 0.013299706421295293,
+            "recall": 0.9882869692532943
+          },
+          {
+            "threshold": 0.05341508239507675,
+            "precision": 0.01500222915737851,
+            "recall": 0.9853587115666179
+          },
+          {
+            "threshold": 0.07079441100358963,
+            "precision": 0.017069920032807055,
+            "recall": 0.9751098096632503
+          },
+          {
+            "threshold": 0.09642300009727478,
+            "precision": 0.020235265435484855,
+            "recall": 0.972181551976574
+          },
+          {
+            "threshold": 0.13018575310707092,
+            "precision": 0.02490096208262592,
+            "recall": 0.9663250366032211
+          },
+          {
+            "threshold": 0.17583075165748596,
+            "precision": 0.031936323883456984,
+            "recall": 0.9516837481698389
+          },
+          {
+            "threshold": 0.2391698807477951,
+            "precision": 0.04554792094637671,
+            "recall": 0.9414348462664714
+          },
+          {
+            "threshold": 0.3775287866592407,
+            "precision": 0.07159168759990865,
+            "recall": 0.91800878477306
+          },
+          {
+            "threshold": 0.700242280960083,
+            "precision": 0.1388101983002833,
+            "recall": 0.8609077598828697
+          },
+          {
+            "threshold": 0.996368408203125,
+            "precision": 1.0,
+            "recall": 0.0029282576866764276
+          }
+        ],
+        "calibration": [
+          {
+            "bin": 0,
+            "n": 16557,
+            "pred_mean": 0.003315847908590094,
+            "observed_freq": 0.0,
+            "pred_min": 0.0032660674769431353,
+            "pred_max": 0.003420707071200013
+          },
+          {
+            "bin": 1,
+            "n": 16504,
+            "pred_mean": 0.00367608141841426,
+            "observed_freq": 0.0,
+            "pred_min": 0.0034219054505228996,
+            "pred_max": 0.004588481038808823
+          },
+          {
+            "bin": 2,
+            "n": 16507,
+            "pred_mean": 0.005196187344338029,
+            "observed_freq": 6.0580359847337494e-05,
+            "pred_min": 0.004590228199958801,
+            "pred_max": 0.0058006285689771175
+          },
+          {
+            "bin": 3,
+            "n": 16519,
+            "pred_mean": 0.006690227482178102,
+            "observed_freq": 0.0,
+            "pred_min": 0.0058006481267511845,
+            "pred_max": 0.008164179511368275
+          },
+          {
+            "bin": 4,
+            "n": 16522,
+            "pred_mean": 0.012283720573368228,
+            "observed_freq": 6.052536012589275e-05,
+            "pred_min": 0.008165527135133743,
+            "pred_max": 0.016654953360557556
+          },
+          {
+            "bin": 5,
+            "n": 16521,
+            "pred_mean": 0.022085016562332433,
+            "observed_freq": 0.00030264511833424126,
+            "pred_min": 0.01665600948035717,
+            "pred_max": 0.027684660628437996
+          },
+          {
+            "bin": 6,
+            "n": 16522,
+            "pred_mean": 0.03579400958453443,
+            "observed_freq": 6.052536012589275e-05,
+            "pred_min": 0.02768496423959732,
+            "pred_max": 0.044911861419677734
+          },
+          {
+            "bin": 7,
+            "n": 16521,
+            "pred_mean": 0.06557797384384931,
+            "observed_freq": 0.0005447612130016343,
+            "pred_min": 0.04491386562585831,
+            "pred_max": 0.0953802540898323
+          },
+          {
+            "bin": 8,
+            "n": 16523,
+            "pred_mean": 0.14615375384240162,
+            "observed_freq": 0.0013314773346244629,
+            "pred_min": 0.09539332240819931,
+            "pred_max": 0.20996388792991638
+          },
+          {
+            "bin": 9,
+            "n": 16521,
+            "pred_mean": 0.49044608659435723,
+            "observed_freq": 0.038980691241450274,
+            "pred_min": 0.21001261472702026,
+            "pred_max": 0.996368408203125
+          }
+        ]
+      }
+    },
+    "h6_u50": {
+      "config": {
+        "horizon": 6,
+        "threshold_mgd": 50.0,
+        "lags": 6,
+        "features": [
+          "api_dynamic",
+          "rain_sum_360m",
+          "rain_sum_120m",
+          "rain_sum_15m",
+          "temp_daily_f",
+          "hour_sin",
+          "minutes_since_last_rain",
+          "delta_rain_10m",
+          "delta_rain_30m",
+          "rain_sum_30m"
+        ],
+        "seq_length": 72,
+        "n_features_input": 16
+      },
+      "fit_seconds": 8.57180643081665,
+      "best_iteration": 131,
+      "prevalence_train": 0.002154797990929623,
+      "scale_pos_weight": 463.0806257521059,
+      "n_train": 771302,
+      "n_val": 165223,
+      "n_test": 165217,
+      "operational_threshold": 0.045561809092760086,
+      "validation_panel": {
+        "class_distribution": {
+          "n_total": 165223,
+          "n_positives": 269,
+          "n_negatives": 164954,
+          "prevalence": 0.0016281026249372061
+        },
+        "default_threshold_metrics": {
+          "threshold": 0.5,
+          "precision": 0.07935800267498885,
+          "recall": 0.6617100371747212,
+          "f1": 0.14171974522292993,
+          "accuracy": 0.9869509692960423,
+          "tp": 178,
+          "fp": 2065,
+          "tn": 162889,
+          "fn": 91
+        },
+        "operational_threshold_metrics": {
+          "threshold": 0.045561809092760086,
+          "precision": 0.0113653283041342,
+          "recall": 0.8513011152416357,
+          "f1": 0.02243118816730336,
+          "accuracy": 0.8791935747444363,
+          "tp": 229,
+          "fp": 19920,
+          "tn": 145034,
+          "fn": 40
+        },
+        "threshold_free_metrics": {
+          "roc_auc": 0.9530514826866456,
+          "auc_pr": 0.3519204382003614,
+          "brier_score": 0.01115477323568031
+        },
+        "lead_time": {
+          "available": false,
+          "threshold_operational": 0.045561809092760086,
+          "threshold_mgd": null,
+          "n_positive_events": 0,
+          "n_events_with_alert": 0,
+          "mean_minutes": null,
+          "median_minutes": null,
+          "p10_minutes": null,
+          "p90_minutes": null,
+          "per_event": []
+        },
+        "pr_curve": [
+          {
+            "threshold": 0.00064464146271348,
+            "precision": 0.0016281026249372061,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.0011069687316194177,
+            "precision": 0.002030050789003011,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.001367609715089202,
+            "precision": 0.0022581890834606536,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.001553431968204677,
+            "precision": 0.002473540473191051,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.0017345870146527886,
+            "precision": 0.002749892662182331,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.0019219694659113884,
+            "precision": 0.003061061926762102,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.0021781495306640863,
+            "precision": 0.0034036845834598643,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.0025914241559803486,
+            "precision": 0.0036940126212097893,
+            "recall": 0.9814126394052045
+          },
+          {
+            "threshold": 0.0032804172951728106,
+            "precision": 0.004036498608103929,
+            "recall": 0.9702602230483272
+          },
+          {
+            "threshold": 0.0043841698206961155,
+            "precision": 0.004513930924750523,
+            "recall": 0.9702602230483272
+          },
+          {
+            "threshold": 0.006470352411270142,
+            "precision": 0.005007318388413836,
+            "recall": 0.966542750929368
+          },
+          {
+            "threshold": 0.00923653319478035,
+            "precision": 0.00557584238952179,
+            "recall": 0.9479553903345725
+          },
+          {
+            "threshold": 0.013256355188786983,
+            "precision": 0.006312150890464143,
+            "recall": 0.9368029739776952
+          },
+          {
+            "threshold": 0.0189217422157526,
+            "precision": 0.0072448949782361015,
+            "recall": 0.9219330855018587
+          },
+          {
+            "threshold": 0.02719532698392868,
+            "precision": 0.008523227556087767,
+            "recall": 0.8996282527881041
+          },
+          {
+            "threshold": 0.03931114077568054,
+            "precision": 0.01043540842029507,
+            "recall": 0.862453531598513
+          },
+          {
+            "threshold": 0.05975606292486191,
+            "precision": 0.013571644956073917,
+            "recall": 0.8327137546468402
+          },
+          {
+            "threshold": 0.10140013694763184,
+            "precision": 0.01977818853974122,
+            "recall": 0.7955390334572491
+          },
+          {
+            "threshold": 0.23110222816467285,
+            "precision": 0.03847641144624903,
+            "recall": 0.7397769516728625
+          },
+          {
+            "threshold": 0.9984795451164246,
+            "precision": 1.0,
+            "recall": 0.007434944237918215
+          }
+        ],
+        "calibration": [
+          {
+            "bin": 0,
+            "n": 16942,
+            "pred_mean": 0.000776666921987742,
+            "observed_freq": 0.0,
+            "pred_min": 0.00064464146271348,
+            "pred_max": 0.0008348408155143261
+          },
+          {
+            "bin": 1,
+            "n": 16106,
+            "pred_mean": 0.0009350209997509898,
+            "observed_freq": 0.0,
+            "pred_min": 0.0008348916890099645,
+            "pred_max": 0.0011209751246497035
+          },
+          {
+            "bin": 2,
+            "n": 16519,
+            "pred_mean": 0.0012851904930575183,
+            "observed_freq": 0.0,
+            "pred_min": 0.0011209853691980243,
+            "pred_max": 0.0014273551059886813
+          },
+          {
+            "bin": 3,
+            "n": 16523,
+            "pred_mean": 0.001572266750618852,
+            "observed_freq": 0.0,
+            "pred_min": 0.001427439390681684,
+            "pred_max": 0.0017100818222388625
+          },
+          {
+            "bin": 4,
+            "n": 16522,
+            "pred_mean": 0.0018675798992206422,
+            "observed_freq": 0.0,
+            "pred_min": 0.001710088225081563,
+            "pred_max": 0.0020571209024637938
+          },
+          {
+            "bin": 5,
+            "n": 16522,
+            "pred_mean": 0.002461335804704507,
+            "observed_freq": 0.0003631521607553565,
+            "pred_min": 0.002057128818705678,
+            "pred_max": 0.0031030450481921434
+          },
+          {
+            "bin": 6,
+            "n": 16522,
+            "pred_mean": 0.0047160292299011815,
+            "observed_freq": 0.000242101440503571,
+            "pred_min": 0.0031031202524900436,
+            "pred_max": 0.007356174755841494
+          },
+          {
+            "bin": 7,
+            "n": 16528,
+            "pred_mean": 0.012751725359554092,
+            "observed_freq": 0.0006655372700871249,
+            "pred_min": 0.007357232738286257,
+            "pred_max": 0.020391501486301422
+          },
+          {
+            "bin": 8,
+            "n": 16517,
+            "pred_mean": 0.035767582490054156,
+            "observed_freq": 0.0014530483744021312,
+            "pred_min": 0.020392877981066704,
+            "pred_max": 0.059666696935892105
+          },
+          {
+            "bin": 9,
+            "n": 16522,
+            "pred_mean": 0.24194667542067144,
+            "observed_freq": 0.013557680668199975,
+            "pred_min": 0.059667617082595825,
+            "pred_max": 0.9984795451164246
+          }
+        ]
+      },
+      "test_panel": {
+        "class_distribution": {
+          "n_total": 165217,
+          "n_positives": 195,
+          "n_negatives": 165022,
+          "prevalence": 0.0011802659532614682
+        },
+        "default_threshold_metrics": {
+          "threshold": 0.5,
+          "precision": 0.043151969981238276,
+          "recall": 0.7076923076923077,
+          "f1": 0.08134394341290893,
+          "accuracy": 0.981133902685559,
+          "tp": 138,
+          "fp": 3060,
+          "tn": 161962,
+          "fn": 57
+        },
+        "operational_threshold_metrics": {
+          "threshold": 0.045561809092760086,
+          "precision": 0.006959596719584681,
+          "recall": 0.9487179487179487,
+          "f1": 0.01381782873361467,
+          "accuracy": 0.8401677793447405,
+          "tp": 185,
+          "fp": 26397,
+          "tn": 138625,
+          "fn": 10
+        },
+        "threshold_free_metrics": {
+          "roc_auc": 0.9677873719401515,
+          "auc_pr": 0.24880985423018992,
+          "brier_score": 0.015566262707765347
+        },
+        "lead_time": {
+          "available": true,
+          "threshold_operational": 0.045561809092760086,
+          "threshold_mgd": 50.0,
+          "n_positive_events": 27,
+          "n_events_with_alert": 17,
+          "mean_minutes": 27.941176470588236,
+          "median_minutes": 30.0,
+          "p10_minutes": 20.0,
+          "p90_minutes": 30.0,
+          "per_event": [
+            {
+              "event_id": 0,
+              "start_index": 772,
+              "end_index": 777,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 1,
+              "start_index": 6107,
+              "end_index": 6120,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-07-28 12:20:00",
+              "first_exceedance_ts": "2024-07-28 12:50:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 2,
+              "start_index": 11631,
+              "end_index": 11637,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-08-16 16:40:00",
+              "first_exceedance_ts": "2024-08-16 17:10:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 3,
+              "start_index": 23708,
+              "end_index": 23714,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-09-27 15:05:00",
+              "first_exceedance_ts": "2024-09-27 15:35:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 4,
+              "start_index": 23721,
+              "end_index": 23728,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-09-27 16:10:00",
+              "first_exceedance_ts": "2024-09-27 16:40:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 5,
+              "start_index": 77664,
+              "end_index": 77670,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-04-02 23:25:00",
+              "first_exceedance_ts": "2025-04-02 23:55:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 6,
+              "start_index": 77930,
+              "end_index": 77935,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 7,
+              "start_index": 81013,
+              "end_index": 81018,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 8,
+              "start_index": 83885,
+              "end_index": 83891,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-04-24 14:00:00",
+              "first_exceedance_ts": "2025-04-24 14:20:00",
+              "lead_time_minutes": 20.0
+            },
+            {
+              "event_id": 9,
+              "start_index": 84200,
+              "end_index": 84205,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 10,
+              "start_index": 85373,
+              "end_index": 85380,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-04-29 17:50:00",
+              "first_exceedance_ts": "2025-04-29 18:20:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 11,
+              "start_index": 85883,
+              "end_index": 85889,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-05-01 12:20:00",
+              "first_exceedance_ts": "2025-05-01 12:50:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 12,
+              "start_index": 99289,
+              "end_index": 99295,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-06-17 01:30:00",
+              "first_exceedance_ts": "2025-06-17 02:00:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 13,
+              "start_index": 99775,
+              "end_index": 99781,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-06-18 18:00:00",
+              "first_exceedance_ts": "2025-06-18 18:30:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 14,
+              "start_index": 107501,
+              "end_index": 107506,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 15,
+              "start_index": 108146,
+              "end_index": 108153,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-17 19:35:00",
+              "first_exceedance_ts": "2025-07-17 20:05:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 16,
+              "start_index": 108665,
+              "end_index": 108670,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 17,
+              "start_index": 108944,
+              "end_index": 108952,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-20 14:05:00",
+              "first_exceedance_ts": "2025-07-20 14:35:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 18,
+              "start_index": 108993,
+              "end_index": 108998,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 19,
+              "start_index": 110990,
+              "end_index": 110995,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 20,
+              "start_index": 111196,
+              "end_index": 111203,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-28 10:00:00",
+              "first_exceedance_ts": "2025-07-28 10:15:00",
+              "lead_time_minutes": 15.0
+            },
+            {
+              "event_id": 21,
+              "start_index": 112040,
+              "end_index": 112047,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-31 08:15:00",
+              "first_exceedance_ts": "2025-07-31 08:35:00",
+              "lead_time_minutes": 20.0
+            },
+            {
+              "event_id": 22,
+              "start_index": 115628,
+              "end_index": 115634,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-08-12 19:05:00",
+              "first_exceedance_ts": "2025-08-12 19:35:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 23,
+              "start_index": 117605,
+              "end_index": 117613,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-08-19 15:50:00",
+              "first_exceedance_ts": "2025-08-19 16:20:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 24,
+              "start_index": 143744,
+              "end_index": 143749,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 25,
+              "start_index": 143753,
+              "end_index": 143758,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 26,
+              "start_index": 143837,
+              "end_index": 143843,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-11-18 17:50:00",
+              "first_exceedance_ts": "2025-11-18 18:20:00",
+              "lead_time_minutes": 30.0
+            }
+          ]
+        },
+        "pr_curve": [
+          {
+            "threshold": 0.0006627394468523562,
+            "precision": 0.0011802659532614682,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.0012667749542742968,
+            "precision": 0.0015113350125944584,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.0015438998816534877,
+            "precision": 0.0017058278076176145,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.0017695819260552526,
+            "precision": 0.001911015288122305,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.002010895172134042,
+            "precision": 0.0021247234573850567,
+            "recall": 0.9948717948717949
+          },
+          {
+            "threshold": 0.002388102002441883,
+            "precision": 0.0023476177153908843,
+            "recall": 0.9897435897435898
+          },
+          {
+            "threshold": 0.002982984995469451,
+            "precision": 0.002577767092732834,
+            "recall": 0.9897435897435898
+          },
+          {
+            "threshold": 0.003833069698885083,
+            "precision": 0.002820730174505276,
+            "recall": 0.9897435897435898
+          },
+          {
+            "threshold": 0.005099182017147541,
+            "precision": 0.0030991569650742675,
+            "recall": 0.9897435897435898
+          },
+          {
+            "threshold": 0.006853579077869654,
+            "precision": 0.003413331446863449,
+            "recall": 0.9897435897435898
+          },
+          {
+            "threshold": 0.009293907321989536,
+            "precision": 0.0037712751253800893,
+            "recall": 0.9794871794871794
+          },
+          {
+            "threshold": 0.012988083995878696,
+            "precision": 0.004167313191319575,
+            "recall": 0.9641025641025641
+          },
+          {
+            "threshold": 0.01957395114004612,
+            "precision": 0.004780066107297229,
+            "recall": 0.9641025641025641
+          },
+          {
+            "threshold": 0.030394891276955605,
+            "precision": 0.005632021202903352,
+            "recall": 0.958974358974359
+          },
+          {
+            "threshold": 0.04377901554107666,
+            "precision": 0.006780530713971559,
+            "recall": 0.9487179487179487
+          },
+          {
+            "threshold": 0.0634535476565361,
+            "precision": 0.008426190256929736,
+            "recall": 0.9384615384615385
+          },
+          {
+            "threshold": 0.09654704481363297,
+            "precision": 0.0110062893081761,
+            "recall": 0.8974358974358975
+          },
+          {
+            "threshold": 0.1644541174173355,
+            "precision": 0.01661291898758917,
+            "recall": 0.8717948717948718
+          },
+          {
+            "threshold": 0.35588717460632324,
+            "precision": 0.03214506490830414,
+            "recall": 0.8
+          },
+          {
+            "threshold": 0.998528242111206,
+            "precision": 1.0,
+            "recall": 0.005128205128205128
+          }
+        ],
+        "calibration": [
+          {
+            "bin": 0,
+            "n": 16528,
+            "pred_mean": 0.0007920090124021014,
+            "observed_freq": 0.0,
+            "pred_min": 0.0006627394468523562,
+            "pred_max": 0.0008568729390390217
+          },
+          {
+            "bin": 1,
+            "n": 16635,
+            "pred_mean": 0.0009668549819866787,
+            "observed_freq": 0.0,
+            "pred_min": 0.0008568851044401526,
+            "pred_max": 0.0011973605724051595
+          },
+          {
+            "bin": 2,
+            "n": 16402,
+            "pred_mean": 0.0013664615910300192,
+            "observed_freq": 0.0,
+            "pred_min": 0.0011974005028605461,
+            "pred_max": 0.0015131314285099506
+          },
+          {
+            "bin": 3,
+            "n": 16522,
+            "pred_mean": 0.0016684514672296782,
+            "observed_freq": 0.0,
+            "pred_min": 0.001513138646259904,
+            "pred_max": 0.0018223398365080357
+          },
+          {
+            "bin": 4,
+            "n": 16522,
+            "pred_mean": 0.002048214276577653,
+            "observed_freq": 0.0001210507202517855,
+            "pred_min": 0.00182238407433033,
+            "pred_max": 0.0023683931212872267
+          },
+          {
+            "bin": 5,
+            "n": 16521,
+            "pred_mean": 0.0031298367194071476,
+            "observed_freq": 0.0,
+            "pred_min": 0.00236870301887393,
+            "pred_max": 0.004208683967590332
+          },
+          {
+            "bin": 6,
+            "n": 16522,
+            "pred_mean": 0.006606507254493868,
+            "observed_freq": 0.000242101440503571,
+            "pred_min": 0.004208857659250498,
+            "pred_max": 0.00992400012910366
+          },
+          {
+            "bin": 7,
+            "n": 16521,
+            "pred_mean": 0.01818740998399466,
+            "observed_freq": 0.00012105804733369651,
+            "pred_min": 0.009924097917973995,
+            "pred_max": 0.03073994815349579
+          },
+          {
+            "bin": 8,
+            "n": 16522,
+            "pred_mean": 0.05472302315568407,
+            "observed_freq": 0.0006657789613848203,
+            "pred_min": 0.0307407695800066,
+            "pred_max": 0.09203045070171356
+          },
+          {
+            "bin": 9,
+            "n": 16522,
+            "pred_mean": 0.3122682585467215,
+            "observed_freq": 0.010652463382157125,
+            "pred_min": 0.09204204380512238,
+            "pred_max": 0.998528242111206
+          }
+        ]
+      }
+    },
+    "h12_u25": {
+      "config": {
+        "horizon": 12,
+        "threshold_mgd": 25.0,
+        "lags": 6,
+        "features": [
+          "api_dynamic",
+          "rain_sum_360m",
+          "rain_sum_120m",
+          "rain_sum_15m",
+          "temp_daily_f",
+          "hour_sin",
+          "minutes_since_last_rain",
+          "delta_rain_10m",
+          "delta_rain_30m",
+          "rain_sum_30m"
+        ],
+        "seq_length": 72,
+        "n_features_input": 16
+      },
+      "fit_seconds": 6.159089088439941,
+      "best_iteration": 89,
+      "prevalence_train": 0.008520657278212685,
+      "scale_pos_weight": 116.36183810103469,
+      "n_train": 771302,
+      "n_val": 165223,
+      "n_test": 165211,
+      "operational_threshold": 0.3010808527469635,
+      "validation_panel": {
+        "class_distribution": {
+          "n_total": 165223,
+          "n_positives": 1162,
+          "n_negatives": 164061,
+          "prevalence": 0.007032919145639529
+        },
+        "default_threshold_metrics": {
+          "threshold": 0.5,
+          "precision": 0.08630506442912796,
+          "recall": 0.7435456110154905,
+          "f1": 0.1546585518661058,
+          "accuracy": 0.9428348353437476,
+          "tp": 864,
+          "fp": 9147,
+          "tn": 154914,
+          "fn": 298
+        },
+        "operational_threshold_metrics": {
+          "threshold": 0.3010808527469635,
+          "precision": 0.05025943636178655,
+          "recall": 0.8502581755593803,
+          "f1": 0.09490874159462055,
+          "accuracy": 0.8859480822887854,
+          "tp": 988,
+          "fp": 18670,
+          "tn": 145391,
+          "fn": 174
+        },
+        "threshold_free_metrics": {
+          "roc_auc": 0.9381858339895216,
+          "auc_pr": 0.4748527860046337,
+          "brier_score": 0.046299526258000365
+        },
+        "lead_time": {
+          "available": false,
+          "threshold_operational": 0.3010808527469635,
+          "threshold_mgd": null,
+          "n_positive_events": 0,
+          "n_events_with_alert": 0,
+          "mean_minutes": null,
+          "median_minutes": null,
+          "p10_minutes": null,
+          "p90_minutes": null,
+          "per_event": []
+        },
+        "pr_curve": [
+          {
+            "threshold": 0.005164589267224073,
+            "precision": 0.007032919145639529,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.010256929323077202,
+            "precision": 0.009553328455271185,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.015595970675349236,
+            "precision": 0.010449734260200181,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.020457176491618156,
+            "precision": 0.011205159990702719,
+            "recall": 0.995697074010327
+          },
+          {
+            "threshold": 0.025371689349412918,
+            "precision": 0.012369847689527579,
+            "recall": 0.9896729776247849
+          },
+          {
+            "threshold": 0.029939530417323112,
+            "precision": 0.013631833712984055,
+            "recall": 0.9888123924268503
+          },
+          {
+            "threshold": 0.03827446699142456,
+            "precision": 0.014678471575023298,
+            "recall": 0.9759036144578314
+          },
+          {
+            "threshold": 0.0507296547293663,
+            "precision": 0.015732338224069206,
+            "recall": 0.9578313253012049
+          },
+          {
+            "threshold": 0.06646285206079483,
+            "precision": 0.0170318173426057,
+            "recall": 0.9526678141135972
+          },
+          {
+            "threshold": 0.08378943055868149,
+            "precision": 0.018619351070956216,
+            "recall": 0.9328743545611016
+          },
+          {
+            "threshold": 0.1006467342376709,
+            "precision": 0.020880767509292235,
+            "recall": 0.923407917383821
+          },
+          {
+            "threshold": 0.11849784106016159,
+            "precision": 0.02377975260125932,
+            "recall": 0.9165232358003442
+          },
+          {
+            "threshold": 0.13928547501564026,
+            "precision": 0.02760608736300836,
+            "recall": 0.9148020654044751
+          },
+          {
+            "threshold": 0.17718902230262756,
+            "precision": 0.03303846031897016,
+            "recall": 0.8967297762478486
+          },
+          {
+            "threshold": 0.24490667879581451,
+            "precision": 0.04023493687070481,
+            "recall": 0.8666092943201377
+          },
+          {
+            "threshold": 0.3150927722454071,
+            "precision": 0.05222406151545896,
+            "recall": 0.8416523235800344
+          },
+          {
+            "threshold": 0.41618481278419495,
+            "precision": 0.0668331374853114,
+            "recall": 0.7831325301204819
+          },
+          {
+            "threshold": 0.537132740020752,
+            "precision": 0.09764855785937682,
+            "recall": 0.725473321858864
+          },
+          {
+            "threshold": 0.758643627166748,
+            "precision": 0.17317770366841354,
+            "recall": 0.6256454388984509
+          },
+          {
+            "threshold": 0.99399334192276,
+            "precision": 1.0,
+            "recall": 0.006024096385542169
+          }
+        ],
+        "calibration": [
+          {
+            "bin": 0,
+            "n": 17214,
+            "pred_mean": 0.005380491799111937,
+            "observed_freq": 0.0,
+            "pred_min": 0.005164589267224073,
+            "pred_max": 0.00541308056563139
+          },
+          {
+            "bin": 1,
+            "n": 16465,
+            "pred_mean": 0.006334699660052047,
+            "observed_freq": 0.0,
+            "pred_min": 0.005413458216935396,
+            "pred_max": 0.00906116608530283
+          },
+          {
+            "bin": 2,
+            "n": 15888,
+            "pred_mean": 0.010355677322073289,
+            "observed_freq": 0.0,
+            "pred_min": 0.009061508812010288,
+            "pred_max": 0.013214829377830029
+          },
+          {
+            "bin": 3,
+            "n": 16522,
+            "pred_mean": 0.017795497457762995,
+            "observed_freq": 0.0003026268006294637,
+            "pred_min": 0.013214941136538982,
+            "pred_max": 0.02273395098745823
+          },
+          {
+            "bin": 4,
+            "n": 16523,
+            "pred_mean": 0.0264906319372204,
+            "observed_freq": 0.0006052169702838468,
+            "pred_min": 0.022734129801392555,
+            "pred_max": 0.031381044536828995
+          },
+          {
+            "bin": 5,
+            "n": 16522,
+            "pred_mean": 0.04479116097096236,
+            "observed_freq": 0.00242101440503571,
+            "pred_min": 0.03138202428817749,
+            "pred_max": 0.06336982548236847
+          },
+          {
+            "bin": 6,
+            "n": 16579,
+            "pred_mean": 0.08489013294015203,
+            "observed_freq": 0.0020507871403582846,
+            "pred_min": 0.06338022649288177,
+            "pred_max": 0.10534496605396271
+          },
+          {
+            "bin": 7,
+            "n": 16471,
+            "pred_mean": 0.1314003930960506,
+            "observed_freq": 0.001639244733167385,
+            "pred_min": 0.10534977167844772,
+            "pred_max": 0.16699083149433136
+          },
+          {
+            "bin": 8,
+            "n": 16516,
+            "pred_mean": 0.24880158295460203,
+            "observed_freq": 0.005873092758537176,
+            "pred_min": 0.16700667142868042,
+            "pred_max": 0.35552456974983215
+          },
+          {
+            "bin": 9,
+            "n": 16523,
+            "pred_mean": 0.6053308471960659,
+            "observed_freq": 0.057435090479937057,
+            "pred_min": 0.35556212067604065,
+            "pred_max": 0.99399334192276
+          }
+        ]
+      },
+      "test_panel": {
+        "class_distribution": {
+          "n_total": 165211,
+          "n_positives": 1097,
+          "n_negatives": 164114,
+          "prevalence": 0.006639993705019642
+        },
+        "default_threshold_metrics": {
+          "threshold": 0.5,
+          "precision": 0.07755909050058417,
+          "recall": 0.7866909753874203,
+          "f1": 0.1411976439790576,
+          "accuracy": 0.9364570155740235,
+          "tp": 863,
+          "fp": 10264,
+          "tn": 153850,
+          "fn": 234
+        },
+        "operational_threshold_metrics": {
+          "threshold": 0.3010808527469635,
+          "precision": 0.04197416974169742,
+          "recall": 0.8295350957155879,
+          "f1": 0.07990516749352417,
+          "accuracy": 0.8731500929114889,
+          "tp": 910,
+          "fp": 20770,
+          "tn": 143344,
+          "fn": 187
+        },
+        "threshold_free_metrics": {
+          "roc_auc": 0.9397170185266753,
+          "auc_pr": 0.4180441078336994,
+          "brier_score": 0.052040094421234126
+        },
+        "lead_time": {
+          "available": true,
+          "threshold_operational": 0.3010808527469635,
+          "threshold_mgd": 25.0,
+          "n_positive_events": 65,
+          "n_events_with_alert": 52,
+          "mean_minutes": 47.21153846153846,
+          "median_minutes": 60.0,
+          "p10_minutes": 15.0,
+          "p90_minutes": 60.0,
+          "per_event": [
+            {
+              "event_id": 0,
+              "start_index": 766,
+              "end_index": 778,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-07-09 23:15:00",
+              "first_exceedance_ts": "2024-07-10 00:15:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 1,
+              "start_index": 2691,
+              "end_index": 2704,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-07-16 16:30:00",
+              "first_exceedance_ts": "2024-07-16 16:40:00",
+              "lead_time_minutes": 10.0
+            },
+            {
+              "event_id": 2,
+              "start_index": 2972,
+              "end_index": 2987,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-07-17 15:05:00",
+              "first_exceedance_ts": "2024-07-17 16:05:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 3,
+              "start_index": 4991,
+              "end_index": 5003,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-07-24 15:20:00",
+              "first_exceedance_ts": "2024-07-24 16:20:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 4,
+              "start_index": 6101,
+              "end_index": 6122,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-07-28 12:15:00",
+              "first_exceedance_ts": "2024-07-28 12:50:00",
+              "lead_time_minutes": 35.0
+            },
+            {
+              "event_id": 5,
+              "start_index": 6899,
+              "end_index": 6910,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 6,
+              "start_index": 11625,
+              "end_index": 11637,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-08-16 16:10:00",
+              "first_exceedance_ts": "2024-08-16 17:10:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 7,
+              "start_index": 15630,
+              "end_index": 15641,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 8,
+              "start_index": 22819,
+              "end_index": 22836,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-09-24 13:00:00",
+              "first_exceedance_ts": "2024-09-24 14:00:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 9,
+              "start_index": 23676,
+              "end_index": 23699,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-09-27 12:25:00",
+              "first_exceedance_ts": "2024-09-27 13:25:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 10,
+              "start_index": 23701,
+              "end_index": 23732,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-09-27 14:30:00",
+              "first_exceedance_ts": "2024-09-27 15:30:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 11,
+              "start_index": 24457,
+              "end_index": 24469,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-09-30 06:15:00",
+              "first_exceedance_ts": "2024-09-30 06:30:00",
+              "lead_time_minutes": 15.0
+            },
+            {
+              "event_id": 12,
+              "start_index": 36267,
+              "end_index": 36280,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-11-10 05:40:00",
+              "first_exceedance_ts": "2024-11-10 06:40:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 13,
+              "start_index": 37327,
+              "end_index": 37338,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 14,
+              "start_index": 37380,
+              "end_index": 37404,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-11-14 02:25:00",
+              "first_exceedance_ts": "2024-11-14 03:25:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 15,
+              "start_index": 38847,
+              "end_index": 38860,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-11-19 04:40:00",
+              "first_exceedance_ts": "2024-11-19 05:40:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 16,
+              "start_index": 44545,
+              "end_index": 44556,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 17,
+              "start_index": 50303,
+              "end_index": 50348,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-12-28 23:20:00",
+              "first_exceedance_ts": "2024-12-29 00:20:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 18,
+              "start_index": 61467,
+              "end_index": 61479,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-02-05 17:40:00",
+              "first_exceedance_ts": "2025-02-05 18:40:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 19,
+              "start_index": 64414,
+              "end_index": 64445,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-02-15 23:15:00",
+              "first_exceedance_ts": "2025-02-16 00:15:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 20,
+              "start_index": 64448,
+              "end_index": 64462,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-02-16 02:05:00",
+              "first_exceedance_ts": "2025-02-16 03:05:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 21,
+              "start_index": 67593,
+              "end_index": 67604,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 22,
+              "start_index": 72273,
+              "end_index": 72291,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-03-15 06:10:00",
+              "first_exceedance_ts": "2025-03-15 07:10:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 23,
+              "start_index": 74711,
+              "end_index": 74722,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 24,
+              "start_index": 76752,
+              "end_index": 76766,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-03-30 19:25:00",
+              "first_exceedance_ts": "2025-03-30 20:25:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 25,
+              "start_index": 77658,
+              "end_index": 77674,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-04-02 22:55:00",
+              "first_exceedance_ts": "2025-04-02 23:55:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 26,
+              "start_index": 77917,
+              "end_index": 77951,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-04-03 20:30:00",
+              "first_exceedance_ts": "2025-04-03 21:30:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 27,
+              "start_index": 78275,
+              "end_index": 78286,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 28,
+              "start_index": 81006,
+              "end_index": 81019,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-04-14 14:20:00",
+              "first_exceedance_ts": "2025-04-14 14:55:00",
+              "lead_time_minutes": 35.0
+            },
+            {
+              "event_id": 29,
+              "start_index": 83879,
+              "end_index": 83894,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-04-24 14:00:00",
+              "first_exceedance_ts": "2025-04-24 14:20:00",
+              "lead_time_minutes": 20.0
+            },
+            {
+              "event_id": 30,
+              "start_index": 84193,
+              "end_index": 84208,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-04-25 15:30:00",
+              "first_exceedance_ts": "2025-04-25 16:30:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 31,
+              "start_index": 85367,
+              "end_index": 85381,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-04-29 17:20:00",
+              "first_exceedance_ts": "2025-04-29 18:20:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 32,
+              "start_index": 85877,
+              "end_index": 85890,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-05-01 12:10:00",
+              "first_exceedance_ts": "2025-05-01 12:50:00",
+              "lead_time_minutes": 40.0
+            },
+            {
+              "event_id": 33,
+              "start_index": 86220,
+              "end_index": 86232,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-05-02 16:25:00",
+              "first_exceedance_ts": "2025-05-02 17:25:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 34,
+              "start_index": 91279,
+              "end_index": 91302,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-05-20 06:00:00",
+              "first_exceedance_ts": "2025-05-20 07:00:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 35,
+              "start_index": 94170,
+              "end_index": 94187,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-05-30 06:55:00",
+              "first_exceedance_ts": "2025-05-30 07:55:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 36,
+              "start_index": 96334,
+              "end_index": 96348,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-06-06 19:15:00",
+              "first_exceedance_ts": "2025-06-06 20:15:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 37,
+              "start_index": 96667,
+              "end_index": 96679,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-06-07 23:00:00",
+              "first_exceedance_ts": "2025-06-08 00:00:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 38,
+              "start_index": 96804,
+              "end_index": 96816,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-06-08 10:55:00",
+              "first_exceedance_ts": "2025-06-08 11:25:00",
+              "lead_time_minutes": 30.0
+            },
+            {
+              "event_id": 39,
+              "start_index": 99283,
+              "end_index": 99296,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-06-17 01:00:00",
+              "first_exceedance_ts": "2025-06-17 02:00:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 40,
+              "start_index": 99769,
+              "end_index": 99783,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-06-18 18:15:00",
+              "first_exceedance_ts": "2025-06-18 18:30:00",
+              "lead_time_minutes": 15.0
+            },
+            {
+              "event_id": 41,
+              "start_index": 107494,
+              "end_index": 107507,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-15 13:55:00",
+              "first_exceedance_ts": "2025-07-15 14:15:00",
+              "lead_time_minutes": 20.0
+            },
+            {
+              "event_id": 42,
+              "start_index": 107766,
+              "end_index": 107777,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 43,
+              "start_index": 108136,
+              "end_index": 108154,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-17 18:45:00",
+              "first_exceedance_ts": "2025-07-17 19:45:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 44,
+              "start_index": 108310,
+              "end_index": 108323,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-18 09:15:00",
+              "first_exceedance_ts": "2025-07-18 10:15:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 45,
+              "start_index": 108658,
+              "end_index": 108671,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-19 15:00:00",
+              "first_exceedance_ts": "2025-07-19 15:15:00",
+              "lead_time_minutes": 15.0
+            },
+            {
+              "event_id": 46,
+              "start_index": 108938,
+              "end_index": 108954,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-20 13:35:00",
+              "first_exceedance_ts": "2025-07-20 14:35:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 47,
+              "start_index": 108986,
+              "end_index": 109000,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-20 18:10:00",
+              "first_exceedance_ts": "2025-07-20 18:35:00",
+              "lead_time_minutes": 25.0
+            },
+            {
+              "event_id": 48,
+              "start_index": 110984,
+              "end_index": 110996,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-27 16:40:00",
+              "first_exceedance_ts": "2025-07-27 17:05:00",
+              "lead_time_minutes": 25.0
+            },
+            {
+              "event_id": 49,
+              "start_index": 111189,
+              "end_index": 111204,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-28 10:00:00",
+              "first_exceedance_ts": "2025-07-28 10:10:00",
+              "lead_time_minutes": 10.0
+            },
+            {
+              "event_id": 50,
+              "start_index": 112033,
+              "end_index": 112048,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-31 08:15:00",
+              "first_exceedance_ts": "2025-07-31 08:30:00",
+              "lead_time_minutes": 15.0
+            },
+            {
+              "event_id": 51,
+              "start_index": 115622,
+              "end_index": 115635,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-08-12 18:45:00",
+              "first_exceedance_ts": "2025-08-12 19:35:00",
+              "lead_time_minutes": 50.0
+            },
+            {
+              "event_id": 52,
+              "start_index": 117594,
+              "end_index": 117614,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-08-19 15:30:00",
+              "first_exceedance_ts": "2025-08-19 15:55:00",
+              "lead_time_minutes": 25.0
+            },
+            {
+              "event_id": 53,
+              "start_index": 122037,
+              "end_index": 122048,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 54,
+              "start_index": 127439,
+              "end_index": 127452,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-09-22 19:20:00",
+              "first_exceedance_ts": "2025-09-22 20:20:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 55,
+              "start_index": 128263,
+              "end_index": 128276,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-09-25 16:00:00",
+              "first_exceedance_ts": "2025-09-25 17:00:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 56,
+              "start_index": 131549,
+              "end_index": 131560,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 57,
+              "start_index": 135055,
+              "end_index": 135067,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-10-19 06:00:00",
+              "first_exceedance_ts": "2025-10-19 07:00:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 58,
+              "start_index": 135105,
+              "end_index": 135116,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 59,
+              "start_index": 140566,
+              "end_index": 140577,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 60,
+              "start_index": 143715,
+              "end_index": 143762,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-11-18 07:40:00",
+              "first_exceedance_ts": "2025-11-18 08:40:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 61,
+              "start_index": 143827,
+              "end_index": 143845,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-11-18 17:50:00",
+              "first_exceedance_ts": "2025-11-18 18:00:00",
+              "lead_time_minutes": 10.0
+            },
+            {
+              "event_id": 62,
+              "start_index": 152491,
+              "end_index": 152513,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-12-18 19:05:00",
+              "first_exceedance_ts": "2025-12-18 20:00:00",
+              "lead_time_minutes": 55.0
+            },
+            {
+              "event_id": 63,
+              "start_index": 155399,
+              "end_index": 155412,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-12-28 21:55:00",
+              "first_exceedance_ts": "2025-12-28 22:20:00",
+              "lead_time_minutes": 25.0
+            },
+            {
+              "event_id": 64,
+              "start_index": 158677,
+              "end_index": 158688,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            }
+          ]
+        },
+        "pr_curve": [
+          {
+            "threshold": 0.005071377847343683,
+            "precision": 0.006639993705019642,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.010397480800747871,
+            "precision": 0.008718388886239728,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.014926381409168243,
+            "precision": 0.00941831587450266,
+            "recall": 0.9990884229717412
+          },
+          {
+            "threshold": 0.020268019288778305,
+            "precision": 0.010113580430361173,
+            "recall": 0.9927073837739289
+          },
+          {
+            "threshold": 0.025587817654013634,
+            "precision": 0.011084021389497838,
+            "recall": 0.9863263445761167
+          },
+          {
+            "threshold": 0.03063659369945526,
+            "precision": 0.012025562656293416,
+            "recall": 0.9863263445761167
+          },
+          {
+            "threshold": 0.038769252598285675,
+            "precision": 0.013145539906103286,
+            "recall": 0.9826800364630811
+          },
+          {
+            "threshold": 0.05029888451099396,
+            "precision": 0.014292925267660263,
+            "recall": 0.9808568824065633
+          },
+          {
+            "threshold": 0.06606591492891312,
+            "precision": 0.01560110125420618,
+            "recall": 0.9762989972652689
+          },
+          {
+            "threshold": 0.08276506513357162,
+            "precision": 0.017151464109873026,
+            "recall": 0.9653600729261622
+          },
+          {
+            "threshold": 0.10036315023899078,
+            "precision": 0.019262642259953593,
+            "recall": 0.9535095715587967
+          },
+          {
+            "threshold": 0.12171071022748947,
+            "precision": 0.022514849755415792,
+            "recall": 0.9398359161349134
+          },
+          {
+            "threshold": 0.14907725155353546,
+            "precision": 0.02581180190219504,
+            "recall": 0.9079307201458523
+          },
+          {
+            "threshold": 0.1969856321811676,
+            "precision": 0.030377746167219853,
+            "recall": 0.8760255241567912
+          },
+          {
+            "threshold": 0.26536983251571655,
+            "precision": 0.03716351948573724,
+            "recall": 0.8432087511394712
+          },
+          {
+            "threshold": 0.35440340638160706,
+            "precision": 0.04865508469989717,
+            "recall": 0.8195077484047402
+          },
+          {
+            "threshold": 0.45806601643562317,
+            "precision": 0.0657855211775308,
+            "recall": 0.7985414767547858
+          },
+          {
+            "threshold": 0.5794976949691772,
+            "precision": 0.09806060606060606,
+            "recall": 0.7374658158614403
+          },
+          {
+            "threshold": 0.8230580687522888,
+            "precision": 0.16779026217228465,
+            "recall": 0.6125797629899726
+          },
+          {
+            "threshold": 0.9939669370651245,
+            "precision": 1.0,
+            "recall": 0.009115770282588878
+          }
+        ],
+        "calibration": [
+          {
+            "bin": 0,
+            "n": 18196,
+            "pred_mean": 0.005385025085831808,
+            "observed_freq": 0.0,
+            "pred_min": 0.005071377847343683,
+            "pred_max": 0.005422600544989109
+          },
+          {
+            "bin": 1,
+            "n": 14847,
+            "pred_mean": 0.006121745512101227,
+            "observed_freq": 0.0,
+            "pred_min": 0.005423140712082386,
+            "pred_max": 0.008789708837866783
+          },
+          {
+            "bin": 2,
+            "n": 16523,
+            "pred_mean": 0.01166384772966923,
+            "observed_freq": 6.0521697028384676e-05,
+            "pred_min": 0.008791075088083744,
+            "pred_max": 0.015413107350468636
+          },
+          {
+            "bin": 3,
+            "n": 16871,
+            "pred_mean": 0.020390068408459288,
+            "observed_freq": 0.0008298263292039594,
+            "pred_min": 0.015414729714393616,
+            "pred_max": 0.025078710168600082
+          },
+          {
+            "bin": 4,
+            "n": 16169,
+            "pred_mean": 0.03068510047000251,
+            "observed_freq": 0.00024738697507576226,
+            "pred_min": 0.02507954277098179,
+            "pred_max": 0.03816140815615654
+          },
+          {
+            "bin": 5,
+            "n": 16523,
+            "pred_mean": 0.053263592236778866,
+            "observed_freq": 0.0006657386673122314,
+            "pred_min": 0.03816286846995354,
+            "pred_max": 0.07307040691375732
+          },
+          {
+            "bin": 6,
+            "n": 16518,
+            "pred_mean": 0.09204070845476535,
+            "observed_freq": 0.001937280542438552,
+            "pred_min": 0.07307229936122894,
+            "pred_max": 0.11324529349803925
+          },
+          {
+            "bin": 7,
+            "n": 16525,
+            "pred_mean": 0.14015104925984154,
+            "observed_freq": 0.003509833585476551,
+            "pred_min": 0.1132463738322258,
+            "pred_max": 0.18250952661037445
+          },
+          {
+            "bin": 8,
+            "n": 16518,
+            "pred_mean": 0.2730411112025238,
+            "observed_freq": 0.004903741373047585,
+            "pred_min": 0.18251550197601318,
+            "pred_max": 0.3927272856235504
+          },
+          {
+            "bin": 9,
+            "n": 16521,
+            "pred_mean": 0.638143063426761,
+            "observed_freq": 0.05423400520549604,
+            "pred_min": 0.3927612900733948,
+            "pred_max": 0.9939669370651245
+          }
+        ]
+      }
+    },
+    "h12_u50": {
+      "config": {
+        "horizon": 12,
+        "threshold_mgd": 50.0,
+        "lags": 6,
+        "features": [
+          "api_dynamic",
+          "rain_sum_360m",
+          "rain_sum_120m",
+          "rain_sum_15m",
+          "temp_daily_f",
+          "hour_sin",
+          "minutes_since_last_rain",
+          "delta_rain_10m",
+          "delta_rain_30m",
+          "rain_sum_30m"
+        ],
+        "seq_length": 72,
+        "n_features_input": 16
+      },
+      "fit_seconds": 5.766886472702026,
+      "best_iteration": 83,
+      "prevalence_train": 0.0034927952993768978,
+      "scale_pos_weight": 285.30363771343724,
+      "n_train": 771302,
+      "n_val": 165223,
+      "n_test": 165211,
+      "operational_threshold": 0.10489904880523682,
+      "validation_panel": {
+        "class_distribution": {
+          "n_total": 165223,
+          "n_positives": 464,
+          "n_negatives": 164759,
+          "prevalence": 0.0028083257173638055
+        },
+        "default_threshold_metrics": {
+          "threshold": 0.5,
+          "precision": 0.048840913112723414,
+          "recall": 0.5948275862068966,
+          "f1": 0.09026982829108748,
+          "accuracy": 0.9663303535222094,
+          "tp": 276,
+          "fp": 5375,
+          "tn": 159384,
+          "fn": 188
+        },
+        "operational_threshold_metrics": {
+          "threshold": 0.10489904880523682,
+          "precision": 0.011158774217063391,
+          "recall": 0.8577586206896551,
+          "f1": 0.022030942957571062,
+          "accuracy": 0.7861375232261852,
+          "tp": 398,
+          "fp": 35269,
+          "tn": 129490,
+          "fn": 66
+        },
+        "threshold_free_metrics": {
+          "roc_auc": 0.9140071046299391,
+          "auc_pr": 0.24231033918042313,
+          "brier_score": 0.02883147540717806
+        },
+        "lead_time": {
+          "available": false,
+          "threshold_operational": 0.10489904880523682,
+          "threshold_mgd": null,
+          "n_positive_events": 0,
+          "n_events_with_alert": 0,
+          "mean_minutes": null,
+          "median_minutes": null,
+          "p10_minutes": null,
+          "p90_minutes": null,
+          "per_event": []
+        },
+        "pr_curve": [
+          {
+            "threshold": 0.006732774432748556,
+            "precision": 0.0028083257173638055,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.010488828644156456,
+            "precision": 0.0041111790400751354,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.013011001981794834,
+            "precision": 0.005091739092265824,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.014837076887488365,
+            "precision": 0.005729133658660244,
+            "recall": 0.9741379310344828
+          },
+          {
+            "threshold": 0.018439415842294693,
+            "precision": 0.00652920455717844,
+            "recall": 0.9547413793103449
+          },
+          {
+            "threshold": 0.024126093834638596,
+            "precision": 0.007244006933315891,
+            "recall": 0.9547413793103449
+          },
+          {
+            "threshold": 0.03244912996888161,
+            "precision": 0.007878426483077646,
+            "recall": 0.9396551724137931
+          },
+          {
+            "threshold": 0.045434240251779556,
+            "precision": 0.00847457627118644,
+            "recall": 0.9202586206896551
+          },
+          {
+            "threshold": 0.05891191586852074,
+            "precision": 0.009330701596985465,
+            "recall": 0.896551724137931
+          },
+          {
+            "threshold": 0.0799572765827179,
+            "precision": 0.010095457044330052,
+            "recall": 0.8706896551724138
+          },
+          {
+            "threshold": 0.10353069007396698,
+            "precision": 0.011110801704213193,
+            "recall": 0.8599137931034483
+          },
+          {
+            "threshold": 0.12686286866664886,
+            "precision": 0.012042419983389766,
+            "recall": 0.8125
+          },
+          {
+            "threshold": 0.154257133603096,
+            "precision": 0.01353440150801131,
+            "recall": 0.7737068965517241
+          },
+          {
+            "threshold": 0.1857025921344757,
+            "precision": 0.014945349096587107,
+            "recall": 0.7219827586206896
+          },
+          {
+            "threshold": 0.2238886058330536,
+            "precision": 0.018105076085749194,
+            "recall": 0.7025862068965517
+          },
+          {
+            "threshold": 0.2757156491279602,
+            "precision": 0.022646092298899842,
+            "recall": 0.6831896551724138
+          },
+          {
+            "threshold": 0.3539131283760071,
+            "precision": 0.03072289156626506,
+            "recall": 0.6594827586206896
+          },
+          {
+            "threshold": 0.47152143716812134,
+            "precision": 0.04440969507427678,
+            "recall": 0.6120689655172413
+          },
+          {
+            "threshold": 0.6528281569480896,
+            "precision": 0.0791465932553338,
+            "recall": 0.4956896551724138
+          },
+          {
+            "threshold": 0.9913809895515442,
+            "precision": 1.0,
+            "recall": 0.008620689655172414
+          }
+        ],
+        "calibration": [
+          {
+            "bin": 0,
+            "n": 16659,
+            "pred_mean": 0.0073921568608152416,
+            "observed_freq": 0.0,
+            "pred_min": 0.006732774432748556,
+            "pred_max": 0.007496955338865519
+          },
+          {
+            "bin": 1,
+            "n": 16386,
+            "pred_mean": 0.007844507580429332,
+            "observed_freq": 0.0,
+            "pred_min": 0.007497008424252272,
+            "pred_max": 0.009124227799475193
+          },
+          {
+            "bin": 2,
+            "n": 16529,
+            "pred_mean": 0.010039974783729047,
+            "observed_freq": 0.0,
+            "pred_min": 0.009124287404119968,
+            "pred_max": 0.01035703718662262
+          },
+          {
+            "bin": 3,
+            "n": 16515,
+            "pred_mean": 0.011217376721959167,
+            "observed_freq": 0.0,
+            "pred_min": 0.010357232764363289,
+            "pred_max": 0.012380280531942844
+          },
+          {
+            "bin": 4,
+            "n": 16561,
+            "pred_mean": 0.013109210021013288,
+            "observed_freq": 0.0007245939254875913,
+            "pred_min": 0.012383679859340191,
+            "pred_max": 0.01399262249469757
+          },
+          {
+            "bin": 5,
+            "n": 16524,
+            "pred_mean": 0.016136455746636757,
+            "observed_freq": 0.0005446623093681918,
+            "pred_min": 0.013993030413985252,
+            "pred_max": 0.019411468878388405
+          },
+          {
+            "bin": 6,
+            "n": 16484,
+            "pred_mean": 0.030285688230030652,
+            "observed_freq": 0.000970638194612958,
+            "pred_min": 0.019413892179727554,
+            "pred_max": 0.047689810395240784
+          },
+          {
+            "bin": 7,
+            "n": 16520,
+            "pred_mean": 0.07686216114630097,
+            "observed_freq": 0.0023002421307506053,
+            "pred_min": 0.0476919524371624,
+            "pred_max": 0.1168302446603775
+          },
+          {
+            "bin": 8,
+            "n": 16523,
+            "pred_mean": 0.17085869870446377,
+            "observed_freq": 0.003933910306845004,
+            "pred_min": 0.11683592200279236,
+            "pred_max": 0.2402503490447998
+          },
+          {
+            "bin": 9,
+            "n": 16522,
+            "pred_mean": 0.4632339550331262,
+            "observed_freq": 0.01961021668078925,
+            "pred_min": 0.24026624858379364,
+            "pred_max": 0.9913809895515442
+          }
+        ]
+      },
+      "test_panel": {
+        "class_distribution": {
+          "n_total": 165211,
+          "n_positives": 354,
+          "n_negatives": 164857,
+          "prevalence": 0.0021427144681649525
+        },
+        "default_threshold_metrics": {
+          "threshold": 0.5,
+          "precision": 0.029998712501609372,
+          "recall": 0.6581920903954802,
+          "f1": 0.057382095801009725,
+          "accuracy": 0.9536653128423652,
+          "tp": 233,
+          "fp": 7534,
+          "tn": 157323,
+          "fn": 121
+        },
+        "operational_threshold_metrics": {
+          "threshold": 0.10489904880523682,
+          "precision": 0.007686191359660748,
+          "recall": 0.9011299435028248,
+          "f1": 0.015242372840862939,
+          "accuracy": 0.7505069275048272,
+          "tp": 319,
+          "fp": 41184,
+          "tn": 123673,
+          "fn": 35
+        },
+        "threshold_free_metrics": {
+          "roc_auc": 0.9186537680370754,
+          "auc_pr": 0.20499354566082834,
+          "brier_score": 0.03759893870435859
+        },
+        "lead_time": {
+          "available": true,
+          "threshold_operational": 0.10489904880523682,
+          "threshold_mgd": 50.0,
+          "n_positive_events": 25,
+          "n_events_with_alert": 17,
+          "mean_minutes": 55.0,
+          "median_minutes": 60.0,
+          "p10_minutes": 46.0,
+          "p90_minutes": 60.0,
+          "per_event": [
+            {
+              "event_id": 0,
+              "start_index": 766,
+              "end_index": 777,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 1,
+              "start_index": 6101,
+              "end_index": 6120,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-07-28 11:50:00",
+              "first_exceedance_ts": "2024-07-28 12:50:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 2,
+              "start_index": 11625,
+              "end_index": 11637,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-08-16 16:10:00",
+              "first_exceedance_ts": "2024-08-16 17:10:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 3,
+              "start_index": 23702,
+              "end_index": 23728,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2024-09-27 14:35:00",
+              "first_exceedance_ts": "2024-09-27 15:35:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 4,
+              "start_index": 77658,
+              "end_index": 77670,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-04-02 22:55:00",
+              "first_exceedance_ts": "2025-04-02 23:55:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 5,
+              "start_index": 77924,
+              "end_index": 77935,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 6,
+              "start_index": 81007,
+              "end_index": 81018,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 7,
+              "start_index": 83879,
+              "end_index": 83891,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-04-24 14:00:00",
+              "first_exceedance_ts": "2025-04-24 14:20:00",
+              "lead_time_minutes": 20.0
+            },
+            {
+              "event_id": 8,
+              "start_index": 84194,
+              "end_index": 84205,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 9,
+              "start_index": 85367,
+              "end_index": 85380,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-04-29 17:20:00",
+              "first_exceedance_ts": "2025-04-29 18:20:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 10,
+              "start_index": 85877,
+              "end_index": 85889,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-05-01 12:10:00",
+              "first_exceedance_ts": "2025-05-01 12:50:00",
+              "lead_time_minutes": 40.0
+            },
+            {
+              "event_id": 11,
+              "start_index": 99283,
+              "end_index": 99295,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-06-17 01:00:00",
+              "first_exceedance_ts": "2025-06-17 02:00:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 12,
+              "start_index": 99769,
+              "end_index": 99781,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-06-18 17:35:00",
+              "first_exceedance_ts": "2025-06-18 18:30:00",
+              "lead_time_minutes": 55.0
+            },
+            {
+              "event_id": 13,
+              "start_index": 107495,
+              "end_index": 107506,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 14,
+              "start_index": 108140,
+              "end_index": 108153,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-17 19:05:00",
+              "first_exceedance_ts": "2025-07-17 20:05:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 15,
+              "start_index": 108659,
+              "end_index": 108670,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 16,
+              "start_index": 108938,
+              "end_index": 108952,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-20 13:35:00",
+              "first_exceedance_ts": "2025-07-20 14:35:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 17,
+              "start_index": 108987,
+              "end_index": 108998,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 18,
+              "start_index": 110984,
+              "end_index": 110995,
+              "detected": false,
+              "has_real_exceedance": false,
+              "lead_time_minutes": null
+            },
+            {
+              "event_id": 19,
+              "start_index": 111190,
+              "end_index": 111203,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-28 09:15:00",
+              "first_exceedance_ts": "2025-07-28 10:15:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 20,
+              "start_index": 112034,
+              "end_index": 112047,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-07-31 07:45:00",
+              "first_exceedance_ts": "2025-07-31 08:35:00",
+              "lead_time_minutes": 50.0
+            },
+            {
+              "event_id": 21,
+              "start_index": 115622,
+              "end_index": 115634,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-08-12 18:35:00",
+              "first_exceedance_ts": "2025-08-12 19:35:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 22,
+              "start_index": 117599,
+              "end_index": 117613,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-08-19 15:20:00",
+              "first_exceedance_ts": "2025-08-19 16:20:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 23,
+              "start_index": 143738,
+              "end_index": 143758,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-11-18 09:35:00",
+              "first_exceedance_ts": "2025-11-18 10:35:00",
+              "lead_time_minutes": 60.0
+            },
+            {
+              "event_id": 24,
+              "start_index": 143831,
+              "end_index": 143843,
+              "detected": true,
+              "has_real_exceedance": true,
+              "first_alert_ts": "2025-11-18 17:30:00",
+              "first_exceedance_ts": "2025-11-18 18:20:00",
+              "lead_time_minutes": 50.0
+            }
+          ]
+        },
+        "pr_curve": [
+          {
+            "threshold": 0.006256689317524433,
+            "precision": 0.0021427144681649525,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.010616328567266464,
+            "precision": 0.003082925469841325,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.013177051208913326,
+            "precision": 0.003708126453397021,
+            "recall": 1.0
+          },
+          {
+            "threshold": 0.01524407509714365,
+            "precision": 0.004125253305027502,
+            "recall": 0.9661016949152542
+          },
+          {
+            "threshold": 0.018730074167251587,
+            "precision": 0.004642701998262381,
+            "recall": 0.9661016949152542
+          },
+          {
+            "threshold": 0.02479926310479641,
+            "precision": 0.0050461084470675025,
+            "recall": 0.9661016949152542
+          },
+          {
+            "threshold": 0.03335915133357048,
+            "precision": 0.00550327265622456,
+            "recall": 0.9548022598870056
+          },
+          {
+            "threshold": 0.04822500795125961,
+            "precision": 0.006083184853229668,
+            "recall": 0.9548022598870056
+          },
+          {
+            "threshold": 0.06518001854419708,
+            "precision": 0.006908569085690857,
+            "recall": 0.9519774011299436
+          },
+          {
+            "threshold": 0.09357015043497086,
+            "precision": 0.007451906541627497,
+            "recall": 0.9180790960451978
+          },
+          {
+            "threshold": 0.11923334002494812,
+            "precision": 0.008139625890271581,
+            "recall": 0.8813559322033898
+          },
+          {
+            "threshold": 0.15074582397937775,
+            "precision": 0.008923169993950392,
+            "recall": 0.8333333333333334
+          },
+          {
+            "threshold": 0.1841590702533722,
+            "precision": 0.009895759966192422,
+            "recall": 0.7937853107344632
+          },
+          {
+            "threshold": 0.22163885831832886,
+            "precision": 0.011501624764836668,
+            "recall": 0.7598870056497176
+          },
+          {
+            "threshold": 0.2710619270801544,
+            "precision": 0.013280632411067193,
+            "recall": 0.711864406779661
+          },
+          {
+            "threshold": 0.3400671184062958,
+            "precision": 0.01701561515300049,
+            "recall": 0.6864406779661016
+          },
+          {
+            "threshold": 0.42889273166656494,
+            "precision": 0.023222060957910014,
+            "recall": 0.6779661016949152
+          },
+          {
+            "threshold": 0.5411869883537292,
+            "precision": 0.033343868520859674,
+            "recall": 0.596045197740113
+          },
+          {
+            "threshold": 0.7454667091369629,
+            "precision": 0.06185944363103953,
+            "recall": 0.4774011299435028
+          },
+          {
+            "threshold": 0.9913866519927979,
+            "precision": 1.0,
+            "recall": 0.002824858757062147
+          }
+        ],
+        "calibration": [
+          {
+            "bin": 0,
+            "n": 16592,
+            "pred_mean": 0.007386637789880041,
+            "observed_freq": 0.0,
+            "pred_min": 0.006256689317524433,
+            "pred_max": 0.007466319482773542
+          },
+          {
+            "bin": 1,
+            "n": 16451,
+            "pred_mean": 0.007852977653792687,
+            "observed_freq": 0.0,
+            "pred_min": 0.007466553244739771,
+            "pred_max": 0.009049523621797562
+          },
+          {
+            "bin": 2,
+            "n": 16526,
+            "pred_mean": 0.010135682419374807,
+            "observed_freq": 0.0,
+            "pred_min": 0.009049836546182632,
+            "pred_max": 0.010546158999204636
+          },
+          {
+            "bin": 3,
+            "n": 16516,
+            "pred_mean": 0.011708733142173374,
+            "observed_freq": 0.0,
+            "pred_min": 0.010546482168138027,
+            "pred_max": 0.012789814732968807
+          },
+          {
+            "bin": 4,
+            "n": 16528,
+            "pred_mean": 0.01386251840315577,
+            "observed_freq": 0.0007260406582768635,
+            "pred_min": 0.012790205888450146,
+            "pred_max": 0.015288963913917542
+          },
+          {
+            "bin": 5,
+            "n": 16515,
+            "pred_mean": 0.019342756244406678,
+            "observed_freq": 0.0,
+            "pred_min": 0.01528913713991642,
+            "pred_max": 0.027289187535643578
+          },
+          {
+            "bin": 6,
+            "n": 16519,
+            "pred_mean": 0.04262157161212969,
+            "observed_freq": 0.0003026817603971185,
+            "pred_min": 0.027289321646094322,
+            "pred_max": 0.06152798980474472
+          },
+          {
+            "bin": 7,
+            "n": 16523,
+            "pred_mean": 0.10541023104500916,
+            "observed_freq": 0.0025419112751921564,
+            "pred_min": 0.0615396611392498,
+            "pred_max": 0.15088127553462982
+          },
+          {
+            "bin": 8,
+            "n": 16521,
+            "pred_mean": 0.21548226852731883,
+            "observed_freq": 0.002905393136008716,
+            "pred_min": 0.1508946269750595,
+            "pred_max": 0.30268415808677673
+          },
+          {
+            "bin": 9,
+            "n": 16520,
+            "pred_mean": 0.5321360548980733,
+            "observed_freq": 0.014951573849878934,
+            "pred_min": 0.3027353286743164,
+            "pred_max": 0.9913866519927979
+          }
+        ]
+      }
+    }
+  }
+}
