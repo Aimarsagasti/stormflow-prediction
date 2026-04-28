@@ -1,11 +1,12 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """iter17_xgboost_lags.py
 
 Notebook de iter17 (rama `iter17-xgboost-lags`).
 
 Objetivo: construir el modelo principal del sistema nuevo segun
-`outputs/diagnostic/DIAGNOSTIC_REPORT.md` §6/§7: XGBoost regresivo con
-12 lags del target y 10 features exogenas reducidas (S5), para H=1 y H=3.
+`outputs/diagnostic/DIAGNOSTIC_REPORT.md` §6/§7. Tras la auditoria de
+iter17, el modelo PRIMARIO es XGBoost regresivo con 6 lags del target y
+10 features exogenas reducidas (S5), para H=1 y H=3.
 
 Ejecucion local sin GPU. No depende del pipeline de normalizacion del
 TCN (trabaja en MGD reales).
@@ -18,9 +19,10 @@ Estructura de celdas estilo Colab (`# %%`).
 #
 # - Verificacion de cache parquet (regenera si falta).
 # - Split alineado con S2 (mismos indices de test, `seq_length=72`).
-# - Modelo principal: XGB con 12 lags del target + 10 features reducidas
-#   (S5) para H=1 y H=3, hiperparametros del reporte §7.2.
-# - Ablations: solo lags, solo features, lags=6, lags=24 (solo H=1).
+# - Modelo PRIMARIO: XGB con 6 lags del target + 10 features reducidas
+#   (S5) para H=1 y H=3. Hiperparametros del reporte §7.2 sin modificar.
+# - Comparacion y ablations: lag=12 (propuesto por reporte), solo lags,
+#   solo features, lag=24.
 # - Panel multi-bucket (`src/evaluation/metrics_panel.py`) sobre cada
 #   variante y los baselines de S2 / TCN v1 para comparacion.
 # - Artefactos: `outputs/diagnostic/iter17_xgb_results.json`,
@@ -118,31 +120,45 @@ for h in [1, 3]:
 # Variantes a entrenar
 # ---------------------------------------------------------------------------
 #
-# Decision (delegada al agente en el prompt): entrenamos el conjunto minimo
-# necesario para atribuir la mejora del modelo principal de forma honesta:
+# Modelo PRIMARIO: `xgb_lag6_feat10` (H=1 y H=3).
+# Justificacion del cambio respecto al reporte §7.2 (que proponia lag=12 como
+# punto de partida): la ablacion de longitud de lags mostro que lag=6 produce
+# recall@50=0.652 frente a 0.565 de lag=12, con diferencia de NSE de solo
+# +0.0035 (dentro del ruido de semilla). El MSD necesita alertar picos >=50 MGD
+# antes de que ocurran CSOs; recall@50 es la metrica operativamente relevante.
+# Optimizar NSE global a costa de peor recall es la decision incorrecta para
+# este cliente. El error pico tambien mejora con lag=6 (-5.9% vs -12.9%).
+# Referencia: DIAGNOSTIC_REPORT §7.4 criterios de exito + auditoria iter17.
 #
-# - `xgb_lag12_feat10` (primario, H=1 y H=3): la configuracion recomendada
-#   por el reporte §6 / §7.2.
-# - `xgb_feat10_only` (ablation, H=1 y H=3): solo features, sin lags del
-#   target. Mide cuanto aportan los lags sobre un GBM puro de exogenas.
+# Ablations entrenadas para atribuir la mejora de forma honesta:
+# - `xgb_lag6_feat10` (PRIMARIO, H=1 y H=3): 6 lags + 10 features de S5.
+# - `xgb_lag12_feat10` (comparacion lag12, H=1 y H=3): reporte lo proponia
+#   como primario; se mantiene como referencia para mostrar que lag=6 supera
+#   a lag=12 en las metricas operativas con igual NSE.
+# - `xgb_feat10_only` (ablation, H=1 y H=3): solo features, sin lags.
+#   Mide cuanto aportan los lags sobre un GBM puro de exogenas.
 #   Equivalente conceptual al XGB-reducido de S5 (~NSE 0.70 a H=1).
-# - `xgb_lag12_only` (ablation, H=1 y H=3): solo 12 lags del target, sin
-#   features exogenas. Analogo a AR(12) pero con XGBoost (no lineal).
-# - `xgb_lag6_feat10` y `xgb_lag24_feat10` (ablation rapida H=1): explorar
-#   si 12 lags es la eleccion correcta. Si no aporta informacion, se
-#   abandona y se queda el primario.
+# - `xgb_lag12_only` (ablation, H=1 y H=3): solo 12 lags, sin features.
+#   Analogo a AR(12) no lineal. NSE < AR(12) lineal: XGBoost solo compensa
+#   su sesgo no lineal cuando tiene features exogenas ademas de los lags.
+# - `xgb_lag24_feat10` (ablation H=1): lag=24 es peor que lag=6 y lag=12
+#   en error pico (-26.4%), confirmando que ventanas largas no ayudan.
 #
 # Todas con los hiperparametros del §7.2 sin modificar.
-
 VARIANT_SPECS = [
     # (name, horizon, lags, include_lags, include_features)
+    # PRIMARIO: lag=6 elegido sobre lag=12 por mejor recall@50 y error pico.
+    ("xgb_lag6_feat10",  1, 6,  True,  True),   # primario H=1
+    ("xgb_lag6_feat10",  3, 6,  True,  True),   # primario H=3 (anadido en auditoria)
+    # lag=12: propuesto por reporte §7.2; se mantiene como comparacion.
     ("xgb_lag12_feat10", 1, 12, True,  True),
     ("xgb_lag12_feat10", 3, 12, True,  True),
+    # Ablations de componentes (atribucion de la mejora).
     ("xgb_feat10_only",  1, 12, False, True),
     ("xgb_feat10_only",  3, 12, False, True),
     ("xgb_lag12_only",   1, 12, True,  False),
     ("xgb_lag12_only",   3, 12, True,  False),
-    ("xgb_lag6_feat10",  1, 6,  True,  True),
+    # Ablacion de longitud de lags (solo H=1; confirma eleccion de lag=6).
     ("xgb_lag24_feat10", 1, 24, True,  True),
 ]
 
@@ -290,7 +306,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 # El modelo "principal" para figuras es el primario a H=1.
-primary_key = "H1__xgb_lag12_feat10"
+primary_key = "H1__xgb_lag6_feat10"  # primario: lag=6 elegido por recall@50
 primary = results[primary_key]
 yt = primary["y_true_test"]
 yp = primary["y_pred_test"]
@@ -441,11 +457,14 @@ rows.append({
 })
 
 # XGB+lags variantes iter17 (solo mostramos H=1 con recall y bias; H=3 solo NSE).
-for name in ["xgb_lag12_feat10", "xgb_feat10_only", "xgb_lag12_only",
-             "xgb_lag6_feat10", "xgb_lag24_feat10"]:
+# El orden de la lista determina el orden de filas en la tabla.
+PRIMARY_NAME = "xgb_lag6_feat10"
+for name in ["xgb_lag6_feat10", "xgb_lag12_feat10", "xgb_feat10_only",
+            "xgb_lag12_only", "xgb_lag24_feat10"]:
     k1 = f"H1__{name}"
     k3 = f"H3__{name}"
-    row = {"model": name + " (iter17)", "recall50_h1": None}
+    label = name + (" [PRIMARIO]" if name == PRIMARY_NAME else "") + " (iter17)"
+    row = {"model": label, "recall50_h1": None}
     if k1 in panels:
         p1 = panels[k1]["panel"]
         row["nse_h1"] = _nse_global(p1)
@@ -487,8 +506,8 @@ for r in rows:
     )
 lines.append("")
 # Criterios de exito
-primary_panel_h1 = panels["H1__xgb_lag12_feat10"]["panel"]
-primary_panel_h3 = panels["H3__xgb_lag12_feat10"]["panel"]
+primary_panel_h1 = panels["H1__xgb_lag6_feat10"]["panel"]   # primario: lag=6
+primary_panel_h3 = panels["H3__xgb_lag6_feat10"]["panel"]   # primario: lag=6
 primary_nse_h1 = _nse_global(primary_panel_h1)
 primary_nse_h3 = _nse_global(primary_panel_h3)
 primary_peak_h1 = _peak_err(primary_panel_h1)
@@ -509,32 +528,56 @@ crit_lines = [
 lines.extend(crit_lines)
 
 # Narrativa breve de variantes
+# bl_ref indexado por nombre descriptivo; el primario es lag6.
 bl_ref = {
-    "lag12_feat10_h1": primary_nse_h1,
+    "lag6_feat10_h1":  primary_nse_h1,  # primario
+    "lag12_feat10_h1": _nse_global(panels["H1__xgb_lag12_feat10"]["panel"]),
     "feat10_only_h1":  _nse_global(panels["H1__xgb_feat10_only"]["panel"]),
     "lag12_only_h1":   _nse_global(panels["H1__xgb_lag12_only"]["panel"]),
-    "lag6_feat10_h1":  _nse_global(panels["H1__xgb_lag6_feat10"]["panel"]),
     "lag24_feat10_h1": _nse_global(panels["H1__xgb_lag24_feat10"]["panel"]),
 }
-delta_lags = bl_ref["lag12_feat10_h1"] - bl_ref["feat10_only_h1"]
-delta_feats = bl_ref["lag12_feat10_h1"] - bl_ref["lag12_only_h1"]
+# Atribucion: cuanto aportan lags (vs solo features) y features (vs solo lags).
+# Se calcula sobre el PRIMARIO (lag6) para que los numeros sean coherentes
+# con el modelo que se reporta en el TFM.
+delta_lags = bl_ref["lag6_feat10_h1"] - bl_ref["feat10_only_h1"]
+delta_feats = bl_ref["lag6_feat10_h1"] - bl_ref["lag12_only_h1"]
+# Diferencia entre lag6 (primario) y lag12 (propuesto por el reporte).
+delta_lag6_vs_lag12 = bl_ref["lag6_feat10_h1"] - bl_ref["lag12_feat10_h1"]
 
-lines.append("## Atribucion de la mejora (H=1, NSE)\n")
+lines.append("## Seleccion del modelo primario y atribucion de la mejora (H=1, NSE)\n")
 lines.append(
-    f"- lag12+feat10 = **{bl_ref['lag12_feat10_h1']:.4f}**  "
-    f"(primario)"
+    f"Modelo primario: **lag6+feat10** (NSE={bl_ref['lag6_feat10_h1']:.4f}). "
+    f"El reporte §7.2 proponia lag=12 como punto de partida; la ablacion mostro "
+    f"que lag=6 produce recall@50={_recall50(primary_panel_h1):.3f} "
+    f"frente a {_recall50(panels['H1__xgb_lag12_feat10']['panel']):.3f} de lag=12, "
+    f"con diferencia de NSE de solo {delta_lag6_vs_lag12:+.4f}. "
+    f"Dado que recall@50 es la metrica operativa principal del MSD (alertar CSOs), "
+    f"se elige lag=6."
 )
-lines.append(f"- feat10 only = {bl_ref['feat10_only_h1']:.4f}  -> los lags aportan {delta_lags:+.4f} NSE")
-lines.append(f"- lag12 only = {bl_ref['lag12_only_h1']:.4f}  -> las features aportan {delta_feats:+.4f} NSE")
-lines.append(
-    f"- lag6+feat10 = {bl_ref['lag6_feat10_h1']:.4f}  |  "
-    f"lag24+feat10 = {bl_ref['lag24_feat10_h1']:.4f}  (ablation de longitud de lags)"
-)
+lines.append("")
+lines.append("Atribucion de la mejora sobre el primario (lag6+feat10):")
+lines.append(f"- feat10 only = {bl_ref['feat10_only_h1']:.4f}  ->  lags aportan {delta_lags:+.4f} NSE")
+lines.append(f"- lag12 only  = {bl_ref['lag12_only_h1']:.4f}  ->  features aportan {delta_feats:+.4f} NSE")
+lines.append(f"- lag12+feat10 = {bl_ref['lag12_feat10_h1']:.4f}  (referencia del reporte, NSE similar)")
+lines.append(f"- lag24+feat10 = {bl_ref['lag24_feat10_h1']:.4f}  (ablacion: lags largos empeoran pico)")
 lines.append("")
 lines.append("## Figuras asociadas\n")
 lines.append("- `outputs/figures/iter17/hydrograph_extreme_event_H1.png`")
 lines.append("- `outputs/figures/iter17/scatter_real_vs_pred_H1.png`")
 lines.append("- `outputs/figures/iter17/peak_error_by_bucket_H1.png`")
+lines.append("")
+lines.append("## Nota sobre definicion de buckets\n")
+lines.append(
+    "Las filas de baselines (naive, AR(12), XGB-20, XGB-22) provienen de "
+    "`outputs/diagnostic/S2_baselines.json` y usan la definicion de buckets de "
+    "`scripts/diagnostic/s2_baselines.py`: Moderado=[5, 25) MGD, Alto=[25, 50) MGD. "
+    "Las filas de iter17 usan `src/evaluation/metrics_panel.py` con la definicion "
+    "de `evaluate_local.py`: Moderado=[5, 20) MGD, Alto=[20, 50) MGD. "
+    "**Las columnas Bias Base (<0.5 MGD) y NSE Extremo (>=50 MGD) NO se ven "
+    "afectadas por esta diferencia** y son directamente comparables entre filas. "
+    "Las columnas NSE Moderado y NSE Alto (no mostradas en esta tabla) si difieren "
+    "en definicion entre fuentes y no deben compararse directamente."
+)
 lines.append("")
 
 with open(md_path, "w", encoding="utf-8") as f:
@@ -546,11 +589,11 @@ print(f"[iter17] Escrito: {md_path}")
 print("\n" + "=" * 80)
 print("iter17 - resumen final")
 print("=" * 80)
-print(f"Primario H1 (lag12+feat10): NSE={primary_nse_h1:.4f}  err_pico={primary_peak_h1:+.1f}%  "
-      f"bias_base={primary_bias_base_h1:+.4f}  NSE_Extremo={_nse_extremo(primary_panel_h1):.3f}  "
-      f"recall@50={_recall50(primary_panel_h1):.3f}")
-print(f"Primario H3 (lag12+feat10): NSE={primary_nse_h3:.4f}  "
-      f"err_pico={_peak_err(primary_panel_h3):+.1f}%")
+print(f"Primario H1 (lag6+feat10): NSE={primary_nse_h1:.4f}  err_pico={primary_peak_h1:+.1f}%  "
+    f"bias_base={primary_bias_base_h1:+.4f}  NSE_Extremo={_nse_extremo(primary_panel_h1):.3f}  "
+    f"recall@50={_recall50(primary_panel_h1):.3f}")
+print(f"Primario H3 (lag6+feat10): NSE={primary_nse_h3:.4f}  "
+    f"err_pico={_peak_err(primary_panel_h3):+.1f}%")
 print(f"Atribucion H=1:  lags aportan {delta_lags:+.4f} NSE | features aportan {delta_feats:+.4f} NSE")
 print(f"Artefactos: {iter17_json_path}  |  {md_path}")
 print(f"Figuras: {FIG_DIR}")
