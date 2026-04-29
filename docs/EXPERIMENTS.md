@@ -308,3 +308,51 @@ La evaluación local de iter16 reporta **0 eventos extremos sin lluvia en ventan
 - Datos brutos: `MC-CL-005/Pesos 13-04-2026/modelo_H1_sinSF_iter16_{weights.pt, norm_params.json, meta.json}`
 - Evaluación completa: `outputs/data_analysis/local_eval_metrics.json`
 - Prompt maestro para Claude Code: `PROMPT_CLAUDE_CODE.md`
+
+
+## Iteración 17 (2026-04-24 a 2026-04-29)
+
+- **Hipótesis:** tras el diagnóstico de Claude Code (rama `diagnostico`, resumido en `outputs/diagnostic/DIAGNOSTIC_REPORT.md`), un XGBoost con lags explícitos del target supera estructuralmente al TwoStageTCN v1 porque (a) elimina los atajos `delta_flow_*` confirmados en iter16, (b) inyecta directamente la señal autorregresiva que un GBM puro pierde, y (c) reduce ruido de features eliminando las 10 con PI <= 0 según S5.
+- **Cambio:** modelo principal nuevo del proyecto: `xgb_lag6_feat10` con 6 lags del target (`stormflow_mgd[t-0..t-5]`) + 10 features reducidas de S5 (`api_dynamic`, `rain_sum_360m`, `rain_sum_120m`, `rain_sum_15m`, `temp_daily_f`, `hour_sin`, `minutes_since_last_rain`, `delta_rain_10m`, `delta_rain_30m`, `rain_sum_30m`). Hiperparámetros del DIAGNOSTIC_REPORT §7.2 sin tunear: `n_estimators=500`, `max_depth=6`, `learning_rate=0.05`, `subsample=0.8`, `tree_method=hist`, `early_stopping_rounds=20`, `random_state=42`. Trabaja en MGD reales (sin pipeline `normalize.py`). Módulos nuevos: `src/models/xgboost_baseline.py` y `src/evaluation/metrics_panel.py`. Notebook orquestador: `notebooks/iter17_xgboost_lags.py`.
+  - **Decisión lag=6 vs lag=12:** el reporte proponía lag=12 como punto de partida, pero la ablación mostró que lag=6 da mejor recall@50 (0.652 vs 0.565) y mejor error pico (-5.9% vs -12.9%) con NSE casi idéntico (-0.0035). Como recall@50 es la métrica operativa de MSD, se eligió lag=6 como primario.
+- **Resultado:**
+
+  | Métrica       | H=1    | H=3    |
+  |---------------|--------|--------|
+  | NSE           | 0.8630 | 0.6871 |
+  | Err pico (%)  | -5.9   | -13.1  |
+  | Bias Base (MGD) | +0.026 | -    |
+  | recall@50     | 0.652  | 0.304  |
+  | NSE Extremo   | -1.727 | -      |
+
+  Los 4 criterios de éxito de §7.4 del DIAGNOSTIC_REPORT se cumplen. Atribución de la mejora a H=1 (NSE): los lags aportan +0.1473 sobre `feat10_only`; las features aportan +0.0853 sobre `lag12_only`. Ambas palancas son necesarias.
+
+- **Lección:**
+  - La autorregresión lineal explícita captura la mayoría de la varianza a H=1 en zero-inflated streamflow; el AR(12) puro da NSE=0.83. Las no linealidades de XGBoost solo compensan cuando se combinan con features exógenas (XGB con solo lags da 0.78, peor que AR(12) lineal).
+  - Optimizar la métrica global (NSE) puede contradecir la métrica operativa (recall@50). En iter17 lag=6 pierde 0.0035 de NSE y gana +0.087 en recall@50; la decisión correcta es priorizar la operativa.
+  - Trabajar en MGD reales sin pipeline de normalización legacy elimina una fuente entera de bugs (BUG2 de S1) sin coste de rendimiento.
+- **Análisis detallado:** `outputs/diagnostic/iter17_comparison.md`, `outputs/diagnostic/iter17_xgb_results.json`, `outputs/figures/iter17/{hydrograph_extreme_event_H1, scatter_real_vs_pred_H1, peak_error_by_bucket_H1}.png`.
+
+---
+
+## Iteración 18 (2026-04-29)
+
+- **Hipótesis:** los horizontes largos (H=6, H=12) tienen techo físico bajo como regresión (S4: NSE máx. 0.32 y 0.19 respectivamente) que no se va a romper con XGBoost ni con deep learning. Reformular como clasificación binaria de alerta es operativamente útil y académicamente defendible: MSD necesita saber "¿habrá rebasamiento >= U en los próximos h pasos?", no la magnitud exacta. Implementa el paso 7.5 del DIAGNOSTIC_REPORT.
+- **Cambio:** cuatro clasificadores XGBoost binarios para `(h, U) in {(6,25), (6,50), (12,25), (12,50)}`. Target operacional: `y_bin(t) = 1 si max(stormflow[t+1..t+h]) >= U else 0` (formulación de ventana completa, no instante puntual; corrige la ambigüedad de §7.5 del reporte). Mismos inputs que el regresor primario (6 lags + 10 features). `objective='binary:logistic'`, `eval_metric='aucpr'`, `scale_pos_weight = neg_train / pos_train`. El umbral operativo se elige como el mayor que cumple recall >= 0.85 en val. Módulos nuevos: `src/models/xgboost_classifier.py`, `src/evaluation/classification_panel.py`. Notebook: `notebooks/iter18_xgboost_classifier.py`. Rama: `iter18-xgboost-classifier` (pendiente de merge).
+- **Resultado:**
+
+  | Variante  | Prevalencia | AUC-PR | ROC-AUC | P@op  | R@op  | Lead time mediano |
+  |-----------|-------------|--------|---------|-------|-------|-------------------|
+  | h6_u25    | 0.41%       | 0.5842 | 0.9806  | 0.102 | 0.884 | 25 min            |
+  | h6_u50    | 0.12%       | 0.2488 | 0.9678  | 0.007 | 0.949 | 30 min            |
+  | h12_u25   | 0.66%       | 0.4180 | 0.9397  | 0.042 | 0.830 | 60 min            |
+  | h12_u50   | 0.21%       | 0.2050 | 0.9187  | 0.008 | 0.901 | 60 min            |
+
+- **Lección:**
+  - ROC-AUC alto (0.92-0.98) confirma que el modelo distingue eventos. La precisión baja (0.7-10%) no es un fallo del modelo, es consecuencia mecánica de la prevalencia minúscula (0.12-0.66%) y del umbral operativo bajo necesario para mantener recall >= 0.85.
+  - Lead times de 25-60 minutos son operativamente útiles para MSD (margen para activar protocolos preventivos antes de un CSO).
+  - En variantes muy raras (U=50) el número absoluto de falsos positivos es alto y un umbral operativo único no es práctico. Recomendación para el TFM: reportar curva PR completa y dejar la elección del punto operativo a MSD según su tolerancia a FP.
+- **Análisis detallado:** `outputs/diagnostic/iter18_comparison.md`, `outputs/diagnostic/iter18_classifier_results.json`, `outputs/figures/iter18/{pr_curves, calibration, lead_time_distribution}.png`.
+- **Commits:** `83045b7`, `fe92229`, `5857bed`.
+
+---

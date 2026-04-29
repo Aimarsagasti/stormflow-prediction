@@ -2,7 +2,7 @@
 
 Documento generado automaticamente por `scripts/generate_dataset_stats.py`.
 
-- **Fecha de generacion:** 2026-04-20 14:45:12
+- **Fecha de generacion:** 2026-04-24 08:34:30
 - **Config usada:** `C:\Dev\TFM\configs\local.yaml`
 - **Proposito:** input para la revision externa con Opus 4.7 sobre metodologia y limite fisico del modelo.
 
