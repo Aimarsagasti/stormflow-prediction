@@ -355,4 +355,106 @@ La evaluación local de iter16 reporta **0 eventos extremos sin lluvia en ventan
 - **Análisis detallado:** `outputs/diagnostic/iter18_comparison.md`, `outputs/diagnostic/iter18_classifier_results.json`, `outputs/figures/iter18/{pr_curves, calibration, lead_time_distribution}.png`.
 - **Commits:** `83045b7`, `fe92229`, `5857bed`.
 
+
+
 ---
+
+## Iteración 19 (2026-05-04) — TCN limpia Bai 2018, ablación en H=1
+
+- **Hipótesis:** una TCN estándar (Bai et al. 2018) sin two-stage, sin atajos `delta_flow_*` y con loss Huber simple supera estructuralmente al regresor `xgb_lag6_feat10` por margen significativo (`delta_NSE >= 0.02`) en H=1. Los mismos inputs que el regresor (6 lags equivalentes + 10 features de S5) pero presentados como secuencia temporal `(B, T=72, F=11)` permiten a la TCN extraer estructura que XGBoost no puede capturar.
+- **Cambio:** modelo nuevo: TCN convolucional causal con 4 bloques residuales `[1,2,4,8]`, kernel=3, dropout=0.1, padding causal con `Chomp1d`. Mini-ablación de 4 corridas en val (A0-A3) variando un eje a la vez: A0 baseline (L=72, C=32, log1p=True), A1 (sin log1p), A2 (L=144), A3 (C=64). Selección por independencia de factores. Módulos nuevos: `src/models/tcn_clean.py`, `src/pipeline/normalize_v2.py`. Notebook: `notebooks/iter19_tcn_clean.py`. Rama: `iter19-tcn-comparison`. Entrenamiento en Colab Pro T4 GPU. Datos en `outputs/cache/df_with_features.parquet` montado desde Drive.
+- **Resultado:**
+  
+  Ablación en val:
+
+  | Run | L | C | log1p | NSE_val | err_pico_val | best_epoch |
+  |-----|--:|--:|:-----:|--------:|-------------:|-----------:|
+  | A0  | 72 | 32 | sí | 0.8436 | +1.5% | 15 |
+  | A1  | 72 | 32 | no | 0.8617 | -24.9% | 12 |
+  | A2  | 144 | 32 | sí | 0.8146 | +6.7% | 7 |
+  | A3  | 72 | 64 | sí | 0.8497 | -23.3% | 25 |
+  | A4  | 72 | 64 | no | 0.8640 | -25.3% | 7 |
+
+  Selección por independencia eligió A4 (sin log1p, C=64). Corrida final en test con A4: NSE=0.8983, error pico +4.7%, recall@50=0.783, NSE_Extremo=-1.231, bias_Extremo=-13.74 MGD. **TCN A4 supera a XGB iter17 H=1 por +0.0353 NSE (umbral +0.020).** VEREDICTO inicial: TCN_WINS en H=1.
+- **Lección:**
+  - La regla automática "max NSE_val con independencia de factores" eligió A4, pero A4 tiene NSE_Base = +0.085 (catastrófico en flujo base, donde está el 99% de los datos). La métrica global NSE puede privilegiar configuraciones con mal comportamiento estructural.
+  - Las dos configuraciones (con log1p vs sin) representan trade-offs distintos: con log1p favorece flujo base y robustez global; sin log1p favorece predicción de magnitud del pico extremo a costa del resto.
+  - El veredicto TCN_WINS en H=1 es contingente: depende de qué configuración se elija como modelo principal y de cómo se replique a otros horizontes (ver iter19b y iter19c).
+- **Análisis detallado:** `outputs/diagnostic/iter19_comparison.md`, `outputs/diagnostic/iter19_tcn_results.json`, `outputs/figures/iter19/{ablation_val_nse, hydrograph_extreme_event_H1, scatter_real_vs_pred_H1, loss_curves_final}.png`.
+
+---
+
+## Iteración 19b (2026-05-04) — A0 (con log1p) re-evaluada en test
+
+- **Hipótesis:** la regla "max NSE_val por independencia" usada en iter19 privilegió la métrica equivocada al elegir A4 (sin log1p). A0 (con log1p) tendría NSE global ligeramente menor pero comportamiento más equilibrado por bucket, sobre todo en bucket Base que concentra el 99% de los puntos. Re-evaluar A0 directamente en test cierra esta duda metodológica antes de declarar A4 definitivo.
+- **Cambio:** una sola corrida adicional con la configuración exacta de A0 (L=72, C=32, log1p=True), mismo split y misma alineación de origenes que iter17. Carga de A4 desde `outputs/iter19/weights/final.pt` para comparar 1:1 sobre los mismos timestamps de test. Sanity check con `raise` si NSE_A4_recomputado difiere de la cifra oficial 0.8983 por más de 0.01. Notebook: `notebooks/iter19b_a0_test.py`. Misma rama `iter19-tcn-comparison`.
+- **Resultado:**
+
+  Comparación A0 vs A4 en test (n=165.222):
+
+  | Métrica | TCN A0 | TCN A4 | Delta (A0 - A4) |
+  |---|---:|---:|---:|
+  | NSE global | 0.8890 | 0.8983 | -0.0093 |
+  | err_pico (%) | +6.6 | +4.7 | +2.0 |
+  | recall@50 | 0.611 | 0.741 | -0.130 |
+
+  Por bucket:
+
+  | Bucket | NSE_A0 | NSE_A4 | Delta NSE | bias_A0 | bias_A4 |
+  |---|---:|---:|---:|---:|---:|
+  | Base (n=152.900) | +0.732 | +0.085 | **+0.646** | -0.002 | +0.002 |
+  | Leve (n=9.520) | +0.870 | +0.765 | +0.106 | +0.010 | +0.136 |
+  | Moderado (n=2.303) | +0.582 | +0.527 | +0.055 | -0.227 | +0.350 |
+  | Alto (n=440) | -0.202 | +0.005 | -0.207 | -2.661 | -1.045 |
+  | Extremo (n=59) | -1.571 | -1.231 | -0.340 | -18.753 | -13.739 |
+
+- **Lección:**
+  - Hipótesis confirmada en buckets que concentran el 99% de los datos: A0 con log1p mejora drásticamente a A4 sin log1p en Base (+0.65 NSE), Leve (+0.11) y Moderado (+0.06).
+  - Hipótesis NO confirmada en buckets de magnitud alta: A0 empeora ligeramente en Alto (-0.21) y Extremo (-0.34) respecto a A4.
+  - Las dos configuraciones representan optimizaciones de objetivos distintos: A0 es un modelo equilibrado para uso operativo continuo; A4 es un modelo especializado en clavar la magnitud de eventos extremos cuando ocurren.
+  - **Decisión:** A0 (con log1p) sustituye a A4 como modelo principal candidato del TFM. Razones: (1) preserva la lección 3 documentada del proyecto (log1p innegociable en variables hidrológicas con cola pesada); (2) mejor comportamiento en flujo base, donde el MSD opera el 99% del tiempo; (3) NSE global de 0.8890 sigue cumpliendo el criterio de cierre vs XGB (`delta = +0.0259 > +0.020`).
+- **Análisis detallado:** `outputs/diagnostic/iter19b_a0_vs_a4.md`, `outputs/diagnostic/iter19b_a0_test_results.json`, `outputs/figures/iter19/scatter_A0_vs_A4_extremo.png`.
+
+---
+
+## Iteración 19c (2026-05-05) — A0 replicada a H=3
+
+- **Hipótesis:** si A0 es modelo principal del TFM en H=1, debe replicarse a H=3 para validar la decisión antes de actualizar STATE.md y EXPERIMENTS.md (requisito explícito del HANDOFF_2026-04-29.md §4). Si A0 supera a XGB en H=3 por `delta_NSE >= 0.02`, A0 queda confirmada como modelo principal definitivo. Si pierde, hay que reabrir la decisión.
+- **Cambio:** una sola corrida con la configuración exacta de A0 (L=72, C=32, log1p=True) pero con `horizon=3`. Mismo dataset, mismo split, misma alineación de origenes. Re-entrenamiento de XGB iter17 inline a H=3 con `train_xgboost_h(horizon=3)` para tener cifras alineadas sobre los mismos timestamps. Sanity check: `|NSE_XGB_inline - 0.6871| <= 0.02` (cifra oficial iter17). Notebook: `notebooks/iter19c_a0_h3.py`. Misma rama `iter19-tcn-comparison`.
+- **Resultado:**
+
+  Comparación TCN A0 H=3 vs XGB H=3 en test (n=165.220):
+
+  | Métrica | TCN A0 H=3 | XGB iter17 H=3 |
+  |---|---:|---:|
+  | NSE global | **0.6096** | 0.6871 |
+  | err_pico (%) | -53.2 | -13.5 |
+  | recall@50 | **0.087** | 0.261 |
+  | NSE Base | +0.711 | -4.37 |
+  | NSE Extremo | -8.064 | -5.553 |
+  | best_epoch | 3 | - |
+  | Delta NSE vs XGB iter17 | -0.0775 | - |
+
+  Sanity XGB inline: NSE = 0.6889 (delta = +0.0018, dentro del umbral 0.02). VEREDICTO H=3: **XGB_WINS** (TCN no supera el umbral +0.020).
+- **Lección:**
+  - **La TCN A0 colapsa en H=3.** El best_epoch=3 con val_NSE máximo de 0.487 indica que el modelo no consigue aprender el rain-to-flow a 15 minutos vista. Recall@50 cae a 8.7% (vs 78.3% en H=1): operativamente inservible a horizonte mayor.
+  - Patrón consistente con la naturaleza convolucional fija de la TCN: el receptive field optimizado para H=1 (donde el target casi se puede copiar del último valor) no transfiere a H=3, donde la señal autoregresiva pesa menos y otras dependencias (lluvia histórica, API) ganan peso relativo. El GBM con lags explícitos absorbe estas últimas eficientemente.
+  - **Decisión final del TFM:** **XGBoost (`xgb_lag6_feat10`) queda como modelo principal único en H=1 y H=3.** La marginal ventaja de TCN en H=1 (+0.026 NSE) no justifica fragmentar el sistema operativo del MSD ni asumir la complejidad añadida (GPU, dependencia PyTorch, mayor coste de inferencia) cuando la TCN no escala a horizontes operativamente útiles.
+  - Hallazgo academicamente fuerte para el TFM: la equivalencia GBM-TCN en H=1 con los datos disponibles refleja techo informacional (S4), no superioridad técnica del GBM. El deep learning aportaría valor con datos enriquecidos (radar NEXRAD, pronóstico HRRR/RAP, multi-estación), línea propuesta como trabajo futuro en sección 9 del TFM.
+  - Las dos arquitecturas tienen sesgos opuestos: TCN aprende la "media" del proceso (mejor en bucket Base), XGB aprende la "varianza" (mejor en buckets de eventos). Esto es coherente con la literatura sobre GBM vs deep learning en problemas con cola pesada.
+- **Análisis detallado:** `outputs/diagnostic/iter19c_a0_h3_comparison.md`, `outputs/diagnostic/iter19c_a0_h3_results.json`, `outputs/figures/iter19/{hydrograph_extreme_event_H3, scatter_real_vs_pred_H3}.png`.
+
+---
+
+## Cierre de modelado (2026-05-05)
+
+Tras iter19c queda **cerrada la fase de modelado del proyecto**. Modelo principal definitivo: `xgb_lag6_feat10` (regresor) + 4 clasificadores binarios `xgb_h{6,12}_u{25,50}`. La TCN limpia A0 queda documentada como contraste académico pero no entra en producción.
+
+A partir de esta fecha, todas las iteraciones futuras quedan fuera del scope del TFM y solo se considerarían en agosto si la escritura del TFM va por delante del calendario.
+
+**Conclusiones firmes adicionales (mayo 2026, sumar a las 18 de la sección "Resumen de conclusiones"):**
+
+19. La TCN limpia Bai 2018 con inputs escalares unidimensionales (1 estación, sin pronóstico) es equivalente al GBM con lags explícitos en H=1 y peor en H=3. La superioridad teórica del deep learning en hidrología requiere inputs estructurados (espaciales, multicanal, con pronóstico) que no están disponibles en este proyecto.
+20. La regla automática "max NSE val por independencia de factores" puede privilegiar configuraciones con mal comportamiento estructural por bucket. Validar siempre la decisión con métricas operativas (recall@50, error pico, NSE por bucket) antes de declarar ganador.
+21. log1p en target es innegociable también en TCN limpia, no solo en TCN v1. La lección 3 histórica del proyecto se generaliza a cualquier arquitectura sobre variables hidrológicas con cola pesada.
+22. Modelos de arquitectura distinta convergen al mismo techo informacional cuando los inputs son los mismos. Para subir el techo hace falta enriquecer los datos, no la arquitectura.

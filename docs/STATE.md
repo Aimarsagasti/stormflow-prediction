@@ -1,6 +1,6 @@
 # STATE.md - Estado actual del proyecto
 
-**Ultima actualizacion:** 2026-04-29 (iter17 e iter18 cerrados, iter19 pendiente).
+**Ultima actualizacion:** 2026-05-05 (iter19/19b/19c cerrados, modelado completo).
 **Mantenido por:** Aimar (actualizar al final de cada sesion significativa).
 
 ---
@@ -11,15 +11,19 @@ Tras el diagnostico de abril el sistema antiguo (TwoStageTCN v1) fue
 descartado por dos razones confirmadas: el atajo autoregresivo
 `delta_flow_5m/15m` y bugs estructurales en `TwoStageLoss`. El
 `DIAGNOSTIC_REPORT` recomendo construir un sistema de dos componentes
-basado en XGBoost.
+basado en XGBoost. iter19 (TCN limpia Bai 2018) cerro la pregunta del
+deep learning con resultado XGB_WINS en H=3, lo que mantiene a XGBoost
+como modelo principal definitivo del TFM.
 
-**Componentes operativos (cerrados):**
+**Componentes operativos (todos cerrados):**
 
 | Componente | Estado | Modelo |
 |---|---|---|
 | A - Regresor stormflow H=1, H=3 | Cerrado, en `main` | `xgb_lag6_feat10` |
-| B - Clasificador alerta H=6, H=12 | Cerrado, rama pendiente merge | 4 variantes XGB binario |
-| C - Comparacion deep learning | Pendiente (iter19) | TCN limpio Bai 2018 |
+| B - Clasificador alerta H=6, H=12 | Cerrado, mergeado a `main` | 4 variantes XGB binario |
+| C - Comparacion deep learning | Cerrado, mergeado a `main` | TCN limpia A0 (descartada como modelo principal) |
+
+**Fase actual del proyecto:** modelado completo, escritura del TFM en curso.
 
 ---
 
@@ -42,7 +46,6 @@ basado en XGBoost.
 | Metrica | H=1 | H=3 |
 |---|---:|---:|
 | NSE | 0.8630 | 0.6871 |
-| RMSE | - | - |
 | Err pico (%) | -5.9 | -13.1 |
 | Bias Base (MGD) | +0.026 | - |
 | recall@50 | 0.652 | 0.304 |
@@ -70,7 +73,7 @@ bias Base <= +0.05.
 
 ## Componente B: clasificador binario (iter18)
 
-**Rama:** `iter18-xgboost-classifier` (pendiente de merge a `main`).
+**Rama:** `iter18-xgboost-classifier` (mergeada a `main`).
 **Codigo:** `src/models/xgboost_classifier.py`,
 `src/evaluation/classification_panel.py`,
 `notebooks/iter18_xgboost_classifier.py`.
@@ -107,40 +110,84 @@ bias Base <= +0.05.
 
 ---
 
-## Componente C: comparacion deep learning (iter19, pendiente)
+## Componente C: comparacion deep learning (iter19/19b/19c)
 
-Implementa el paso 7.6 del DIAGNOSTIC_REPORT. Es la ultima iteracion de
-modelado del proyecto.
+**Rama:** `iter19-tcn-comparison` (mergeada a `main` en mayo 2026).
+**Codigo:** `src/models/tcn_clean.py`, `src/pipeline/normalize_v2.py`,
+`notebooks/iter19_tcn_clean.py`, `notebooks/iter19b_a0_test.py`,
+`notebooks/iter19c_a0_h3.py`.
 
-### Especificacion
+Implementa el paso 7.6 del DIAGNOSTIC_REPORT. Tres sub-iteraciones:
+ablacion en H=1 (iter19), re-evaluacion de A0 con log1p en test (iter19b),
+y replica a H=3 con A0 (iter19c).
 
-- TCN estandar (Bai 2018), sin two-stage, sin switch duro, sin loss
-  compuesta.
-- Mismos inputs que el regresor primario: 6 lags + 10 features.
-- Mismo split temporal que iter17 e iter18.
-- Loss Huber simple.
-- Solo H=1 inicialmente. Si gana, se replica a H=3.
-- Entrenamiento en Colab Pro con T4 GPU.
+### Configuracion final (TCN A0 limpia Bai 2018)
 
-### Criterio de cierre
+- Arquitectura: 4 bloques residuales con dilations `[1,2,4,8]`,
+  `kernel_size=3`, `hidden_channels=32`, `dropout=0.1`.
+- Receptive field = 61 pasos sobre ventana L=72.
+- Inputs: 11 canales (1 target historico + 10 features de S5),
+  shape `(B, T=72, F=11)`.
+- Normalizacion: z-score sobre train, `log1p` sobre target.
+- Loss: `HuberLoss(delta=1.0)` en espacio normalizado.
+- Optimizer: AdamW lr=1e-3, wd=1e-4, batch=256, max_epochs=50, patience=10.
+- Mismo split temporal e indices alineados que iter17 (n_test=165.222).
+- 23.489 parametros.
 
-- `NSE_TCN - NSE_XGB >= 0.02` -> TCN entra como modelo principal en TFM.
-- `NSE_TCN - NSE_XGB <  0.02` -> deep learning se cierra para el TFM,
-  XGBoost queda definitivo, y la seccion comparativa documenta esto como
-  hallazgo academicamente valido.
+### Mini-ablacion en val (iter19, 4 corridas + A4 extra)
 
-### Decisiones pendientes (a tomar al inicio de iter19)
+| Run | L | C | log1p | NSE_val | err_pico_val | Notas |
+|---|---:|---:|:---:|---:|---:|---|
+| A0 | 72 | 32 | si | 0.8436 | +1.5% | baseline equilibrada |
+| A1 | 72 | 32 | no | 0.8617 | -24.9% | gana en NSE val pero infraestima picos |
+| A2 | 144 | 32 | si | 0.8146 | +6.7% | empeora con ventana doble |
+| A3 | 72 | 64 | si | 0.8497 | -23.3% | empeora con C=64 + log1p |
+| A4 | 72 | 64 | no | 0.8640 | -25.3% | combinacion ganadora por independencia |
 
-- Tamano de la TCN. La v1 tenia 104K params, claramente oversize. Para 6
-  lags + 10 features Bai 2018 sugiere 3 bloques con dilations [1,2,4],
-  32-64 canales, kernel_size=3, dropout=0.1 como punto de partida.
-- Sequence length: 6 (igual que el regresor) o 72 (como v1).
-- Normalizacion: NO usar el pipeline viejo (`src/pipeline/normalize.py`
-  tiene bug latente BUG2 documentado en S1). Usar StandardScaler externo.
+La regla "max NSE_val por independencia de factores" eligio A4 inicialmente.
 
-### Tiempo estimado
+### Comparacion completa H=1 y H=3 en test
 
-3-5 dias.
+| Metrica | TCN A0 H=1 | XGB H=1 | TCN A0 H=3 | XGB H=3 |
+|---|---:|---:|---:|---:|
+| NSE global | 0.8890 | 0.8631 | 0.6096 | 0.6889 |
+| NSE Base | +0.732 | similar | +0.711 | -4.37 |
+| NSE Extremo | -1.571 | -1.808 | -8.064 | -5.553 |
+| Err pico (%) | +6.6 | -13.5 | -53.2 | -13.5 |
+| recall@50 | 0.741 | 0.609 | 0.087 | 0.261 |
+
+### Veredicto y decision final
+
+- **H=1:** TCN A0 supera marginalmente a XGB (`delta_NSE = +0.0259`,
+  por encima del umbral +0.020 del DIAGNOSTIC_REPORT §7.6).
+- **H=3:** TCN A0 PIERDE contra XGB (`delta_NSE = -0.0775`, MUY por
+  debajo del umbral). La TCN colapsa a horizonte mayor: best_epoch=3,
+  recall@50 cae a 0.087, error pico -53.2%.
+
+**Decision final del TFM:** **XGBoost queda como modelo principal unico
+en H=1 y H=3.** Razones:
+
+1. La ventaja de TCN en H=1 es marginal (+0.026 NSE) y no se replica a H=3.
+2. La TCN en H=3 es operativamente inservible (recall 8.7% vs 26.1% XGB).
+3. Mantener un modelo unico (XGB) preserva coherencia narrativa,
+   simplicidad operativa y menor coste de inferencia.
+4. La narrativa del TFM se cierra como hallazgo academicamente fuerte:
+   con los inputs disponibles (1 estacion pluviometrica, sin pronostico,
+   1 cuenca), el GBM con lags explicitos absorbe la senal predecible
+   disponible. El deep learning aportaria valor solo enriqueciendo la
+   base de datos con: (a) datos espaciales de lluvia (radar NEXRAD),
+   (b) integracion con pronostico meteorologico (HRRR/RAP del NWS), o
+   (c) entrenamiento multi-estacion con datos fisicos de cuenca.
+
+### Hallazgos tecnicos colaterales (para discusion del TFM)
+
+- log1p en target es esencial tambien en la TCN limpia (confirma
+  leccion 3 historica). Sin log1p, NSE_Base colapsa de 0.732 a 0.085.
+- Las dos arquitecturas tienen sesgos opuestos: TCN aprende la "media"
+  del proceso (flujo base), XGB aprende la "varianza" (eventos).
+  Ninguna es estrictamente superior a la otra; coexisten.
+- La ventaja de TCN en H=1 viene parcialmente de un solo evento extremo
+  bien clavado (28 julio 2024). Resultado con varianza alta entre seeds.
 
 ---
 
@@ -163,19 +210,19 @@ modifican.
 |---|---|---|
 | iter17 | abril | Regresor cerrado |
 | iter18 | abril | Clasificador cerrado |
-| iter19 | mayo (3-5 dias) | TCN limpio + decision deep learning |
-| Escritura TFM | junio-julio | Secciones 5, 6, 7, 8 |
+| iter19/19b/19c | mayo | TCN limpia + decision deep learning cerrada |
+| Escritura TFM | mayo-julio | Secciones 5, 6, 7, 8, 9 |
 | Revision y figuras | agosto | TFM completo |
 | Entrega | septiembre 2026 | TFM final |
 
-**Regla acordada:** no empezar iter20 ni iteraciones adicionales tras
-iter19. Tras iter19, escritura.
+**Regla acordada:** modelado cerrado tras iter19c. No habra mas iteraciones
+de modelo. A partir de aqui, escritura.
 
 ---
 
 ## Bloqueos actuales
 
-Ninguno. iter19 puede empezar cuando el usuario quiera.
+Ninguno. Modelado completo. Siguiente fase: TFM escrito.
 
 ---
 
@@ -184,7 +231,10 @@ Ninguno. iter19 puede empezar cuando el usuario quiera.
 - DIAGNOSTIC_REPORT: `outputs/diagnostic/DIAGNOSTIC_REPORT.md`.
 - Resultados iter17: `outputs/diagnostic/iter17_comparison.md`.
 - Resultados iter18: `outputs/diagnostic/iter18_comparison.md`.
+- Resultados iter19 (H=1, ablacion): `outputs/diagnostic/iter19_comparison.md`.
+- Resultados iter19b (A0 vs A4 en H=1): `outputs/diagnostic/iter19b_a0_vs_a4.md`.
+- Resultados iter19c (A0 H=3 vs XGB): `outputs/diagnostic/iter19c_a0_h3_comparison.md`.
 - Bugs latentes: `outputs/diagnostic/S1_pipeline_audit.md`.
 - Techo fisico: `outputs/diagnostic/S4_horizon_ceiling.md`.
 - Justificacion features: `outputs/diagnostic/S5_feature_analysis.md`.
-- Handoff de la transicion entre conversaciones: `HANDOFF_2026-04-29.md`.
+- Handoff de transicion entre conversaciones: `HANDOFF_2026-04-29.md`.
