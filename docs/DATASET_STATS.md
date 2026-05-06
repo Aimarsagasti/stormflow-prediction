@@ -230,7 +230,7 @@ The comparison is especially relevant because section 6 shows that the target AC
 
 ### Model NSE vs naive NSE (test split)
 
-| Horizon | Min | NSE naive | NSE model SIN SF | Gain SIN SF | NSE model CON SF | Gain CON SF |
+| NSE model WITHOUT SF | Gain WITHOUT SF | NSE model WITH SF | Gain WITH SF |
 |-----------|-----|----------:|------------------:|----------------:|------------------:|----------------:|
 | H=1 | 5m | 0.811 | 0.861 | +0.050 | 0.854 | +0.043 |
 | H=3 | 15m | 0.409 | 0.471 | +0.062 | 0.488 | +0.079 |
