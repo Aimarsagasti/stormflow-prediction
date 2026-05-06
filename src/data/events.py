@@ -1,1 +1,1 @@
-"""Parsing y procesamiento de eventos de tormenta"""
+"""Storm event parsing and processing."""

@@ -1,11 +1,11 @@
 """Normalization utilities with train-only statistics for MSD pipeline."""
 
-from __future__ import annotations  # Permite anotaciones modernas de tipos en versiones soportadas
+from __future__ import annotations  # Allows modern type annotations in supported versions
 
-from typing import Dict, List, Tuple  # Define estructuras de retorno claras para parametros de normalizacion
+from typing import Dict, List, Tuple  # Defines clear return structures for normalization parameters
 
-import numpy as np  # Aporta operaciones numericas robustas para escalado
-import pandas as pd  # Provee DataFrames para transformar cada split
+import numpy as np  # Provides robust numeric operations for scaling
+import pandas as pd  # Provides DataFrames to transform each split
 
 
 def _get_log_columns(
@@ -14,22 +14,22 @@ def _get_log_columns(
     apply_log1p_to_target: bool,
 ) -> List[str]:
     """Return skewed columns that should receive log1p before scaling."""
-    log_columns = []  # Acumula columnas sesgadas para transformacion logaritmica
-    for column_name in feature_columns:  # Recorre cada feature candidata de entrada
-        if column_name == "rain_in" or column_name.startswith("rain_sum_"):  # Selecciona lluvia base y acumulados segun proposal.md
-            log_columns.append(column_name)  # Guarda columna para aplicar log1p antes del escalado
-    if apply_log1p_to_target:  # Permite comprimir tambien la cola extrema del target cuando asi se configure
-        log_columns.append(target_col)  # Agrega target a la lista de columnas transformadas con log1p
-    return log_columns  # Devuelve lista final de columnas transformadas
+    log_columns = []  # Accumulates skewed columns for log transformation
+    for column_name in feature_columns:  # Iterates through each candidate input feature
+        if column_name == "rain_in" or column_name.startswith("rain_sum_"):  # Selects base rainfall and accumulations according to proposal.md
+            log_columns.append(column_name)  # Stores the column to apply log1p before scaling
+    if apply_log1p_to_target:  # Also allows compressing the extreme tail of the target when configured that way
+        log_columns.append(target_col)  # Adds the target to the list of columns transformed with log1p
+    return log_columns  # Returns the final list of transformed columns
 
 
 def _apply_log_transform(df_split: pd.DataFrame, log_columns: List[str]) -> pd.DataFrame:
     """Apply log1p to selected columns using non-negative clipping."""
-    df_out = df_split.copy()  # Trabaja sobre copia para no mutar entradas originales
-    for column_name in log_columns:  # Recorre columnas sesgadas seleccionadas
-        if column_name in df_out.columns:  # Verifica existencia para evitar errores por columnas ausentes
-            df_out[column_name] = np.log1p(df_out[column_name].clip(lower=0.0))  # Aplica log1p sobre valores no negativos para estabilidad numerica
-    return df_out  # Devuelve DataFrame transformado en el espacio logaritmico
+    df_out = df_split.copy()  # Works on a copy to avoid mutating original inputs
+    for column_name in log_columns:  # Iterates through selected skewed columns
+        if column_name in df_out.columns:  # Verifies existence to avoid errors for missing columns
+            df_out[column_name] = np.log1p(df_out[column_name].clip(lower=0.0))  # Applies log1p on non-negative values for numeric stability
+    return df_out  # Returns DataFrame transformed in log space
 
 
 def _zscore_scale(
@@ -39,11 +39,11 @@ def _zscore_scale(
     stats_std: Dict[str, float],
 ) -> pd.DataFrame:
     """Scale columns with precomputed z-score statistics."""
-    df_out = df_split.copy()  # Crea copia para no tocar el DataFrame original
-    for column_name in columns:  # Itera por todas las columnas a normalizar
-        if column_name in df_out.columns:  # Evita fallo si una columna no esta disponible en el split
-            df_out[column_name] = (df_out[column_name] - stats_mean[column_name]) / stats_std[column_name]  # Aplica z-score con stats de train
-    return df_out  # Regresa DataFrame normalizado
+    df_out = df_split.copy()  # Creates a copy to avoid touching the original DataFrame
+    for column_name in columns:  # Iterates through all columns to normalize
+        if column_name in df_out.columns:  # Avoids failure if a column is not available in the split
+            df_out[column_name] = (df_out[column_name] - stats_mean[column_name]) / stats_std[column_name]  # Applies z-score with train stats
+    return df_out  # Returns normalized DataFrame
 
 
 def normalize_splits(
@@ -55,76 +55,76 @@ def normalize_splits(
     apply_log1p_to_target: bool = True,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, object]]:
     """Normalize train/val/test with train-only z-score stats and optional log1p."""
-    if target_col not in df_train.columns:  # Valida que el target exista en train para calcular sus estadisticas
-        raise ValueError(f"Target column '{target_col}' not found in train split")  # Da mensaje explicito para depuracion rapida
+    if target_col not in df_train.columns:  # Validates that the target exists in train to compute its statistics
+        raise ValueError(f"Target column '{target_col}' not found in train split")  # Gives an explicit message for quick debugging
 
-    log_columns = _get_log_columns(  # Define columnas sesgadas que se transforman con log1p
-        feature_columns=feature_columns,  # Pasa features del modelo para detectar lluvia/acumulados sesgados
-        target_col=target_col,  # Pasa nombre del target por si tambien se debe comprimir
-        apply_log1p_to_target=apply_log1p_to_target,  # Indica si el target entra o no en transformacion logaritmica
+    log_columns = _get_log_columns(  # Defines skewed columns that are transformed with log1p
+        feature_columns=feature_columns,  # Passes model features to detect skewed rainfall/accumulations
+        target_col=target_col,  # Passes the target name in case it should also be compressed
+        apply_log1p_to_target=apply_log1p_to_target,  # Indicates whether the target enters the log transform
     )
 
-    train_transformed = _apply_log_transform(df_train, log_columns)  # Transforma train antes de calcular estadisticas segun el pipeline propuesto
-    val_transformed = _apply_log_transform(df_val, log_columns)  # Aplica misma transformacion en validacion para mantener consistencia
-    test_transformed = _apply_log_transform(df_test, log_columns)  # Aplica misma transformacion en test para inferencia coherente
+    train_transformed = _apply_log_transform(df_train, log_columns)  # Transforms train before computing statistics according to the proposed pipeline
+    val_transformed = _apply_log_transform(df_val, log_columns)  # Applies the same transformation to validation for consistency
+    test_transformed = _apply_log_transform(df_test, log_columns)  # Applies the same transformation to test for coherent inference
 
-    all_norm_columns = list(feature_columns) + [target_col]  # Construye conjunto final de columnas a escalar en z-score
-    stats_mean: Dict[str, float] = {}  # Almacena medias por columna calculadas solo en train
-    stats_std: Dict[str, float] = {}  # Almacena desviaciones por columna para usar en escalado y desnormalizacion
+    all_norm_columns = list(feature_columns) + [target_col]  # Builds the final set of columns to scale with z-score
+    stats_mean: Dict[str, float] = {}  # Stores per-column means computed only on train
+    stats_std: Dict[str, float] = {}  # Stores per-column standard deviations for scaling and denormalization
 
-    for column_name in all_norm_columns:  # Recorre features y target para extraer estadisticas base
-        if column_name not in train_transformed.columns:  # Valida esquema esperado antes de continuar
-            raise ValueError(f"Column '{column_name}' not found in train split")  # Falla de forma clara si falta alguna columna critica
-        col_mean = float(train_transformed[column_name].mean())  # Calcula media de train para la columna
-        col_std_raw = float(train_transformed[column_name].std(ddof=0))  # Calcula desviacion estandar poblacional para estabilidad
-        col_std = col_std_raw if col_std_raw > 0.0 else 1.0  # Evita division por cero en columnas constantes
-        stats_mean[column_name] = col_mean  # Guarda media en diccionario de parametros
-        stats_std[column_name] = col_std  # Guarda desviacion estandar util para normalizar y revertir
+    for column_name in all_norm_columns:  # Iterates through features and target to extract base statistics
+        if column_name not in train_transformed.columns:  # Validates the expected schema before continuing
+            raise ValueError(f"Column '{column_name}' not found in train split")  # Fails clearly if any critical column is missing
+        col_mean = float(train_transformed[column_name].mean())  # Computes the train mean for the column
+        col_std_raw = float(train_transformed[column_name].std(ddof=0))  # Computes population standard deviation for stability
+        col_std = col_std_raw if col_std_raw > 0.0 else 1.0  # Avoids division by zero in constant columns
+        stats_mean[column_name] = col_mean  # Stores mean in the parameter dictionary
+        stats_std[column_name] = col_std  # Stores the standard deviation used to normalize and reverse
 
-    df_train_norm = _zscore_scale(train_transformed, all_norm_columns, stats_mean, stats_std)  # Escala train usando stats de train
-    df_val_norm = _zscore_scale(val_transformed, all_norm_columns, stats_mean, stats_std)  # Escala val sin leakage de informacion futura
-    df_test_norm = _zscore_scale(test_transformed, all_norm_columns, stats_mean, stats_std)  # Escala test con mismas reglas de entrenamiento
+    df_train_norm = _zscore_scale(train_transformed, all_norm_columns, stats_mean, stats_std)  # Scales train using train stats
+    df_val_norm = _zscore_scale(val_transformed, all_norm_columns, stats_mean, stats_std)  # Scales val without future information leakage
+    df_test_norm = _zscore_scale(test_transformed, all_norm_columns, stats_mean, stats_std)  # Scales test with the same training rules
 
-    norm_params: Dict[str, object] = {  # Empaqueta toda la informacion necesaria para reproducir transformacion e inversion
-        "feature_columns": list(feature_columns),  # Conserva orden de features para reconstruir tensores luego
-        "target_col": target_col,  # Guarda nombre del target normalizado
-        "log1p_columns": log_columns,  # Lista columnas que recibieron transformacion log1p
-        "apply_log1p_to_target": apply_log1p_to_target,  # Guarda bandera explicita para trazabilidad del target
-        "mean": stats_mean,  # Diccionario de medias por columna
-        "std": stats_std,  # Diccionario de desviaciones por columna
+    norm_params: Dict[str, object] = {  # Packs all information needed to reproduce the transform and inverse
+        "feature_columns": list(feature_columns),  # Preserves feature order to reconstruct tensors later
+        "target_col": target_col,  # Stores the normalized target name
+        "log1p_columns": log_columns,  # List of columns that received log1p transformation
+        "apply_log1p_to_target": apply_log1p_to_target,  # Stores explicit flag for target traceability
+        "mean": stats_mean,  # Dictionary of per-column means
+        "std": stats_std,  # Dictionary of per-column standard deviations
     }
 
-    print(f"[normalize] Columnas con log1p: {log_columns}")  # Reporta columnas sesgadas transformadas antes del z-score
-    print(f"[normalize] Shape train_norm: {df_train_norm.shape}")  # Reporta dimensiones finales del split train normalizado
-    print(f"[normalize] Shape val_norm: {df_val_norm.shape}")  # Reporta dimensiones finales de validacion normalizada
-    print(f"[normalize] Shape test_norm: {df_test_norm.shape}")  # Reporta dimensiones finales de test normalizado
+    print(f"[normalize] Columns with log1p: {log_columns}")  # Reports skewed columns transformed before z-score
+    print(f"[normalize] Shape train_norm: {df_train_norm.shape}")  # Reports final dimensions of the normalized train split
+    print(f"[normalize] Shape val_norm: {df_val_norm.shape}")  # Reports final dimensions of normalized validation
+    print(f"[normalize] Shape test_norm: {df_test_norm.shape}")  # Reports final dimensions of normalized test
 
-    return df_train_norm, df_val_norm, df_test_norm, norm_params  # Devuelve splits normalizados y parametros para inferencia/desnormalizacion
+    return df_train_norm, df_val_norm, df_test_norm, norm_params  # Returns normalized splits and parameters for inference/denormalization
 
 
 def normalize_target_values(values: np.ndarray, norm_params: Dict[str, object]) -> np.ndarray:
     """Convert raw target values in MGD into the normalized training scale."""
-    target_col = str(norm_params["target_col"])  # Recupera nombre del target para acceder a sus parametros de transformacion
-    values_array = np.asarray(values, dtype=float)  # Convierte valores entrantes a arreglo numpy para transformar en bloque
-    if target_col in norm_params.get("log1p_columns", []):  # Revisa si el target se comprimio con log1p al normalizar
-        values_array = np.log1p(np.clip(values_array, a_min=0.0, a_max=None))  # Reproduce la misma transformacion sobre valores reales no negativos
-    target_mean = float(norm_params["mean"][target_col])  # Extrae media usada en z-score del target
-    target_std = float(norm_params["std"][target_col])  # Extrae desviacion usada en z-score del target
-    normalized_values = (values_array - target_mean) / target_std  # Lleva los valores al mismo espacio de entrenamiento del modelo
-    return normalized_values  # Devuelve arreglo listo para comparar con y_true/y_pred normalizados
+    target_col = str(norm_params["target_col"])  # Retrieves the target name to access its transformation parameters
+    values_array = np.asarray(values, dtype=float)  # Converts incoming values to a numpy array for batch transformation
+    if target_col in norm_params.get("log1p_columns", []):  # Checks whether the target was compressed with log1p during normalization
+        values_array = np.log1p(np.clip(values_array, a_min=0.0, a_max=None))  # Reproduces the same transformation on real non-negative values
+    target_mean = float(norm_params["mean"][target_col])  # Extracts the mean used in z-score for the target
+    target_std = float(norm_params["std"][target_col])  # Extracts the standard deviation used in z-score for the target
+    normalized_values = (values_array - target_mean) / target_std  # Moves values into the same training space as the model
+    return normalized_values  # Returns array ready to compare with normalized y_true/y_pred
 
 
 def denormalize_target(y_norm: np.ndarray, norm_params: Dict[str, object]) -> np.ndarray:
     """Convert normalized target values back to real-world units."""
-    target_col = str(norm_params["target_col"])  # Recupera nombre del target para buscar sus parametros de escala
-    target_mean = float(norm_params["mean"][target_col])  # Extrae media de train usada en la normalizacion del target
-    target_std = float(norm_params["std"][target_col])  # Extrae desviacion de train usada en la normalizacion del target
+    target_col = str(norm_params["target_col"])  # Retrieves the target name to look up its scaling parameters
+    target_mean = float(norm_params["mean"][target_col])  # Extracts the train mean used in target normalization
+    target_std = float(norm_params["std"][target_col])  # Extracts the train standard deviation used in target normalization
 
-    y_norm_array = np.asarray(y_norm, dtype=float)  # Convierte entrada a arreglo numpy para operar de forma vectorizada
-    y_real = (y_norm_array * target_std) + target_mean  # Revierte z-score al espacio transformado previo al escalado
+    y_norm_array = np.asarray(y_norm, dtype=float)  # Converts input to a numpy array for vectorized operations
+    y_real = (y_norm_array * target_std) + target_mean  # Reverses z-score to the transformed space before scaling
 
-    if target_col in norm_params.get("log1p_columns", []):  # Verifica si el target tambien usa log1p para revertir completamente
-        y_real = np.expm1(y_real)  # Revierte log1p y devuelve valores reales en unidades originales
+    if target_col in norm_params.get("log1p_columns", []):  # Checks whether the target also uses log1p to fully reverse it
+        y_real = np.expm1(y_real)  # Reverses log1p and returns real values in original units
 
-    y_real = np.clip(y_real, a_min=0.0, a_max=None)  # Impone no negatividad por consistencia fisica del stormflow
-    return y_real  # Devuelve target en escala fisica para interpretacion y metricas
+    y_real = np.clip(y_real, a_min=0.0, a_max=None)  # Enforces non-negativity for physical stormflow consistency
+    return y_real  # Returns target in physical scale for interpretation and metrics

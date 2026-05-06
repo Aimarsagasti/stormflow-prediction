@@ -1,20 +1,20 @@
-"""Normalizacion z-score + log1p opcional sobre el target. Para iter19 (TCN limpia).
+"""Z-score normalization + optional log1p on the target. For iter19 (clean TCN).
 
-Modulo independiente del pipeline antiguo `src/pipeline/normalize.py`, que tiene
-un bug latente documentado en `outputs/diagnostic/S1_pipeline_audit.md` (BUG2:
-si `stormflow_mgd` aparece en feature_columns Y target_col se normaliza dos
-veces in-place). Aqui se evita por construccion: las features y el target se
-mantienen separados, no se itera in-place sobre listas que puedan contener
-duplicados, y la transformacion se aplica sobre copias numpy.
+Independent module from the old pipeline `src/pipeline/normalize.py`, which has
+a latent bug documented in `outputs/diagnostic/S1_pipeline_audit.md` (BUG2:
+if `stormflow_mgd` appears in feature_columns AND target_col, it is normalized
+twice in-place). Here that is avoided by construction: features and target are
+kept separate, there is no in-place iteration over lists that may contain
+duplicates, and the transformation is applied on numpy copies.
 
-Diferencias respecto a `normalize.py`:
-- Las features NUNCA reciben log1p. El antiguo aplicaba log1p a `rain_*`; aqui
-  se confia en que la red maneja la asimetria con su no linealidad. Mantener
-  el modulo simple y predecible.
-- El target SI puede recibir log1p (parametro `log1p_target`). Esto es el
-  unico tratamiento no lineal del modulo.
-- Trabaja sobre arrays numpy en `transform`, no sobre DataFrames. Devuelve
-  matrices listas para alimentar a la red.
+Differences relative to `normalize.py`:
+- Features NEVER receive log1p. The old version applied log1p to `rain_*`; here
+  we trust the network to handle asymmetry through its nonlinearity. This keeps
+  the module simple and predictable.
+- The target CAN receive log1p (parameter `log1p_target`). This is the only
+  nonlinear treatment in the module.
+- It works on numpy arrays in `transform`, not on DataFrames. It returns
+  matrices ready to feed into the network.
 """
 
 from __future__ import annotations
@@ -31,30 +31,30 @@ def fit_scaler(
     target_col: str,
     log1p_target: bool = True,
 ) -> Dict:
-    """Calcula estadisticas de normalizacion sobre TRAIN unicamente.
+    """Compute normalization statistics on TRAIN only.
 
-    Para cada feature en `feature_cols`: media y desviacion estandar poblacional
-    (ddof=0). Para el target: si `log1p_target=True`, aplica log1p antes de
-    calcular las estadisticas. Las desviaciones nulas se sustituyen por 1.0 para
-    evitar division por cero en columnas constantes.
+    For each feature in `feature_cols`: mean and population standard deviation
+    (ddof=0). For the target: if `log1p_target=True`, applies log1p before
+    computing the statistics. Zero standard deviations are replaced by 1.0 to
+    avoid division by zero in constant columns.
 
     Args:
-        df_train: DataFrame con todas las columnas necesarias (features + target).
-        feature_cols: lista de nombres de columnas de features (orden importa).
-        target_col: nombre de la columna del target.
-        log1p_target: si True, log1p(clip(y, 0, None)) antes de calcular mu/sigma.
+        df_train: DataFrame with all required columns (features + target).
+        feature_cols: list of feature column names (order matters).
+        target_col: name of the target column.
+        log1p_target: if True, log1p(clip(y, 0, None)) before computing mu/sigma.
 
     Returns:
-        Dict con claves: feature_cols, target_col, feature_means, feature_stds,
-        target_mean, target_std, log1p_target. Los arrays se devuelven como
-        np.float32 para que sean compatibles directamente con tensores torch.
+        Dict with keys: feature_cols, target_col, feature_means, feature_stds,
+        target_mean, target_std, log1p_target. Arrays are returned as
+        np.float32 so they are directly compatible with torch tensors.
     """
     feature_cols = list(feature_cols)
     if target_col in feature_cols:
-        # Aviso de seguridad: no permitir que el target aparezca en features.
-        # Si esto se ignora, la red ve el target como input (leakage trivial).
+        # Safety warning: do not allow the target to appear in features.
+        # If ignored, the network sees the target as input (trivial leakage).
         raise ValueError(
-            f"target_col='{target_col}' aparece en feature_cols. Sacalo antes de llamar a fit_scaler."
+            f"target_col='{target_col}' appears in feature_cols. Remove it before calling fit_scaler."
         )
 
     feat_mat = df_train[feature_cols].to_numpy(dtype=np.float64, copy=False)
@@ -81,14 +81,14 @@ def fit_scaler(
 
 
 def transform(df: pd.DataFrame, scaler: Dict) -> Dict[str, np.ndarray]:
-    """Aplica la transformacion del scaler a un DataFrame.
+    """Apply the scaler transformation to a DataFrame.
 
-    Devuelve dict con:
-        features: np.ndarray (N, F) en float32, normalizado con z-score.
-        target:   np.ndarray (N,)   en float32, en espacio normalizado
-                  (con log1p aplicado al inicio si procede).
+    Returns a dict with:
+        features: np.ndarray (N, F) in float32, normalized with z-score.
+        target:   np.ndarray (N,)   in float32, in normalized space
+                  (with log1p applied first when appropriate).
 
-    No modifica el DataFrame de entrada.
+    Does not modify the input DataFrame.
     """
     feature_cols: List[str] = scaler["feature_cols"]
     target_col: str = scaler["target_col"]
@@ -107,10 +107,10 @@ def transform(df: pd.DataFrame, scaler: Dict) -> Dict[str, np.ndarray]:
 
 
 def inverse_transform_target(y_norm, scaler: Dict) -> np.ndarray:
-    """Devuelve el target en MGD reales a partir de su version normalizada.
+    """Return the target in real MGD from its normalized version.
 
-    Aplica primero la inversa del z-score y luego, si procede, expm1.
-    Fuerza no-negatividad por consistencia fisica con el stormflow.
+    First applies the inverse of z-score and then, if appropriate, expm1.
+    Enforces non-negativity for physical consistency with stormflow.
     """
     y_norm_arr = np.asarray(y_norm, dtype=np.float64)
     y = y_norm_arr * float(scaler["target_std"]) + float(scaler["target_mean"])
