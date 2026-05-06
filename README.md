@@ -35,7 +35,8 @@ All metrics computed on the same chronologically held-out test set (n = 165,222 
 | Peak err % |       +6.6 |   −13.5 |      −53.2 |   −13.5 |
 | recall@50  |      0.741 |   0.609 |      0.087 |   0.261 |
 
-The TCN beats XGBoost at H=1 by +0.026 NSE (below the +0.020 threshold for operational relevance once seed variance is considered) and clearly loses at H=3. XGBoost is therefore retained as the single production regressor.
+The TCN beats XGBoost at H=1 by +0.026 NSE (marginally above the +0.020 operational threshold, but the advantage does not replicate at H=3 where
+the TCN loses by −0.078 NSE). XGBoost is therefore retained as the single production regressor.
 
 ## 3. System components
 
