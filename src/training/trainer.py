@@ -1,26 +1,26 @@
 """Training utilities for stormflow models with early stopping and diagnostics."""
 
-from __future__ import annotations  # Permite anotaciones modernas de tipos sin problemas de version
+from __future__ import annotations  # Allows modern type annotations without version issues
 
-from copy import deepcopy  # Permite guardar y restaurar los mejores pesos del modelo
-from typing import Any, Dict, List, Tuple  # Define tipos explicitos para historia, configuracion y metadata
+from copy import deepcopy  # Lets us save and restore the best model weights
+from typing import Any, Dict, List, Tuple  # Defines explicit types for history, configuration, and metadata
 
-import numpy as np  # Aporta conversion a arreglos para prediccion y reportes
-import torch  # Provee tensores y operaciones de entrenamiento en CPU/GPU
-from torch import nn  # Incluye tipos de modulos y funciones de perdida
-from torch.optim import AdamW  # Optimizer recomendado en la propuesta
-from torch.optim.lr_scheduler import ReduceLROnPlateau  # Scheduler recomendado para ajustar LR por validacion
-from torch.utils.data import DataLoader  # Tipo de entrada para loaders de train/val/test
-from src.models.tcn import TwoStageTCN  # Importa la clase two-stage para detectar comportamiento especial
+import numpy as np  # Provides conversion to arrays for prediction and reporting
+import torch  # Provides tensors and training operations on CPU/GPU
+from torch import nn  # Includes module types and loss functions
+from torch.optim import AdamW  # Optimizer recommended in the proposal
+from torch.optim.lr_scheduler import ReduceLROnPlateau  # Scheduler recommended to adjust LR by validation
+from torch.utils.data import DataLoader  # Input type for train/val/test loaders
+from src.models.tcn import TwoStageTCN  # Imports two-stage class to detect special behavior
 
 
 def _resolve_device(config: Dict[str, Any]) -> torch.device:
     """Resolve device from config with CUDA fallback when available."""
-    if "device" in config:  # Revisa si el usuario fijo dispositivo manualmente en la configuracion
-        return torch.device(str(config["device"]))  # Respeta dispositivo explicito si fue proporcionado
-    if torch.cuda.is_available():  # Verifica disponibilidad de GPU en Colab para acelerar entrenamiento
-        return torch.device("cuda")  # Usa GPU por defecto cuando existe soporte CUDA
-    return torch.device("cpu")  # Fallback seguro a CPU para entornos sin acelerador
+    if "device" in config:  # Checks whether the user manually fixed a device in the configuration
+        return torch.device(str(config["device"]))  # Respects explicit device if it was provided
+    if torch.cuda.is_available():  # Checks GPU availability in Colab to speed up training
+        return torch.device("cuda")  # Uses GPU by default when CUDA support exists
+    return torch.device("cpu")  # Safe fallback to CPU for environments without accelerator
 
 
 def _unpack_batch(
@@ -28,19 +28,19 @@ def _unpack_batch(
     device: torch.device,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Move a batch to device and normalize the tuple shape."""
-    if len(batch) == 4:  # Soporta dataset que incluye etiqueta auxiliar de evento para metadata
-        x_batch, y_batch, w_batch, event_batch = batch  # Desempaqueta la cuadrupla completa del DataLoader
-    elif len(batch) == 3:  # Mantiene compatibilidad con datasets sin etiqueta auxiliar explicita
-        x_batch, y_batch, w_batch = batch  # Desempaqueta tripleta clasica (X, y, w)
-        event_batch = (y_batch > 0).to(dtype=y_batch.dtype)  # Construye mascara minima para conservar metadata consistente
-    else:  # Detecta formatos inesperados antes de entrenar con un batch mal formado
-        raise ValueError("Expected batches with 3 or 4 tensors")  # Lanza error claro para depurar DataLoaders inconsistentes
+    if len(batch) == 4:  # Supports dataset that includes auxiliary event label for metadata
+        x_batch, y_batch, w_batch, event_batch = batch  # Unpacks the full tuple from the DataLoader
+    elif len(batch) == 3:  # Preserves compatibility with datasets without explicit auxiliary label
+        x_batch, y_batch, w_batch = batch  # Unpacks classic triplet (X, y, w)
+        event_batch = (y_batch > 0).to(dtype=y_batch.dtype)  # Builds a minimal mask to preserve consistent metadata
+    else:  # Detects unexpected formats before training on a malformed batch
+        raise ValueError("Expected batches with 3 or 4 tensors")  # Raises a clear error to debug inconsistent DataLoaders
 
-    x_batch = x_batch.to(device)  # Mueve features de batch al dispositivo de entrenamiento
-    y_batch = y_batch.to(device)  # Mueve target del batch al dispositivo de entrenamiento
-    w_batch = w_batch.to(device)  # Mueve pesos por muestra al dispositivo de entrenamiento
-    event_batch = event_batch.to(device)  # Mueve etiqueta auxiliar al dispositivo para metadata opcional
-    return x_batch, y_batch, w_batch, event_batch  # Devuelve batch homogenizado y listo para el modelo y metricas
+    x_batch = x_batch.to(device)  # Moves batch features to training device
+    y_batch = y_batch.to(device)  # Moves batch target to training device
+    w_batch = w_batch.to(device)  # Moves sample weights to training device
+    event_batch = event_batch.to(device)  # Moves auxiliary label to device for optional metadata
+    return x_batch, y_batch, w_batch, event_batch  # Returns homogenized batch ready for model and metrics
 
 
 def train_model(
@@ -51,177 +51,178 @@ def train_model(
     config: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Train model with AdamW, cosine restarts, grad clipping, and safer early stopping."""
-    device = _resolve_device(config)  # Determina dispositivo de entrenamiento segun config o disponibilidad
-    model = model.to(device)  # Mueve modelo al dispositivo objetivo para computo consistente
-    is_two_stage = isinstance(model, TwoStageTCN)  # Detecta si el modelo usa salida dict y entrenamiento two-stage
+    device = _resolve_device(config)  # Determines training device from config or availability
+    model = model.to(device)  # Moves model to target device for consistent computation
+    is_two_stage = isinstance(model, TwoStageTCN)  # Detects whether the model uses dict output and two-stage training
 
-    learning_rate = float(config.get("learning_rate", 5e-4))  # Reduce LR por defecto para estabilizar arranque con features nuevas de escala distinta
-    weight_decay = float(config.get("weight_decay", 1e-4))  # Usa weight decay recomendado si no viene override
-    max_epochs = int(config.get("max_epochs", 80))  # Limita epocas segun propuesta para evitar sobreentrenamiento
-    min_epochs = min(int(config.get("min_epochs", 20)), max_epochs)  # Fuerza una fase minima de aprendizaje antes de permitir early stopping
-    grad_clip_max_norm = float(config.get("grad_clip_max_norm", 1.0))  # Define clipping de gradiente recomendado
-    early_stopping_patience = int(config.get("early_stopping_patience", 8))  # Aumenta paciencia para no cortar demasiado pronto una validacion ruidosa
-    early_stopping_min_delta = float(config.get("early_stopping_min_delta", 5e-5))  # Reduce min_delta para aceptar mejoras pequenas pero reales en tareas raras
+    learning_rate = float(config.get("learning_rate", 5e-4))  # Reduces default LR to stabilize startup with new differently scaled features
+    weight_decay = float(config.get("weight_decay", 1e-4))  # Uses recommended weight decay unless overridden
+    max_epochs = int(config.get("max_epochs", 80))  # Limits epochs according to the proposal to avoid overtraining
+    min_epochs = min(int(config.get("min_epochs", 20)), max_epochs)  # Forces a minimum learning phase before allowing early stopping
+    grad_clip_max_norm = float(config.get("grad_clip_max_norm", 1.0))  # Defines recommended gradient clipping
+    early_stopping_patience = int(config.get("early_stopping_patience", 8))  # Increases patience so noisy validation does not stop too early
+    early_stopping_min_delta = float(config.get("early_stopping_min_delta", 5e-5))  # Reduces min_delta to accept small but real improvements in rare tasks
 
-    optimizer = AdamW(  # Inicializa optimizer AdamW con hiperparametros de propuesta
-        model.parameters(),  # Optimiza todos los parametros entrenables del modelo
-        lr=learning_rate,  # Configura tasa de aprendizaje inicial
-        weight_decay=weight_decay,  # Configura regularizacion L2 desacoplada
+    optimizer = AdamW(  # Initializes AdamW optimizer with proposal hyperparameters
+        model.parameters(),  # Optimizes all trainable model parameters
+        lr=learning_rate,  # Configures initial learning rate
+        weight_decay=weight_decay,  # Configures decoupled L2 regularization
     )
-    scheduler = ReduceLROnPlateau(  # Inicializa scheduler que reduce LR cuando se estanca val_loss
-        optimizer=optimizer,  # Conecta scheduler al optimizer de entrenamiento
-        mode="min",  # Minimiza metrica de validacion (val_loss)
-        factor=0.5,  # Reduce LR a la mitad cuando no hay mejora
-        patience=4,  # Espera 4 epochs sin mejora antes de reducir LR
+    scheduler = ReduceLROnPlateau(  # Initializes scheduler that reduces LR when val_loss stagnates
+        optimizer=optimizer,  # Connects scheduler to the training optimizer
+        mode="min",  # Minimizes validation metric (val_loss)
+        factor=0.5,  # Cuts LR in half when there is no improvement
+        patience=4,  # Waits 4 epochs without improvement before reducing LR
     )
 
-    history: Dict[str, Any] = {  # Prepara contenedor de historia para monitoreo y analisis posterior
-        "train_loss": [],  # Guarda perdida media de entrenamiento por epoca
-        "val_loss": [],  # Guarda perdida media de validacion por epoca
-        "best_epoch": -1,  # Guarda epoca de mejor validacion observada
-        "best_val_loss": float("inf"),  # Guarda mejor valor de validacion para early stopping
+    history: Dict[str, Any] = {  # Prepares history container for monitoring and later analysis
+        "train_loss": [],  # Stores mean training loss per epoch
+        "val_loss": [],  # Stores mean validation loss per epoch
+        "best_epoch": -1,  # Stores epoch of the best validation observed
+        "best_val_loss": float("inf"),  # Stores best validation value for early stopping
     }
-    if is_two_stage:  # Agrega historia adicional solo cuando el modelo es two-stage
-        history["train_cls_loss"] = []  # Guarda perdida de clasificacion promedio por epoca
-        history["train_reg_loss"] = []  # Guarda perdida de regresion promedio por epoca
-        history["val_cls_loss"] = []  # Guarda perdida de clasificacion en validacion por epoca
-        history["val_reg_loss"] = []  # Guarda perdida de regresion en validacion por epoca
+    if is_two_stage:  # Adds extra history only when the model is two-stage
+        history["train_cls_loss"] = []  # Stores mean classification loss per epoch
+        history["train_reg_loss"] = []  # Stores mean regression loss per epoch
+        history["val_cls_loss"] = []  # Stores validation classification loss per epoch
+        history["val_reg_loss"] = []  # Stores validation regression loss per epoch
 
-    best_state_dict = deepcopy(model.state_dict())  # Toma snapshot inicial para poder restaurar mejores pesos luego
-    epochs_without_improvement = 0  # Contador de epocas consecutivas sin mejora en validacion
+    best_state_dict = deepcopy(model.state_dict())  # Takes initial snapshot so the best weights can be restored later
+    epochs_without_improvement = 0  # Counter of consecutive epochs without validation improvement
 
-    train_diag = getattr(train_loader, "stormflow_diagnostics", {})  # Recupera diagnosticos adjuntos por el pipeline si existen
-    if train_diag:  # Imprime diagnostico de desbalance antes de entrenar para trazabilidad en Colab
-        print(  # Resume la tasa de evento natural y el peso BCE sugerido por el loader de train
+    train_diag = getattr(train_loader, "stormflow_diagnostics", {})  # Recovers diagnostics attached by the pipeline if they exist
+    if train_diag:  # Prints imbalance diagnostic before training for traceability in Colab
+        print(  # Summarizes natural event rate and BCE weight suggested by the train loader
             f"[train] Event rate(train)={train_diag.get('event_rate', float('nan')):.4f} | "
             f"event_pos_weight={train_diag.get('event_pos_weight', float('nan')):.4f} | "
             f"min_epochs={min_epochs}"
         )
 
-    for epoch_idx in range(max_epochs):  # Recorre ciclo principal de entrenamiento por epocas
-        model.train()  # Activa modo entrenamiento para dropout y capas dependientes del modo train
-        train_loss_sum = 0.0  # Acumula perdida total de train para promediar al final de la epoca
-        train_cls_loss_sum = 0.0  # Acumula perdida de clasificacion para logging si aplica
-        train_reg_loss_sum = 0.0  # Acumula perdida de regresion para logging si aplica
-        train_batches = 0  # Cuenta batches procesados para calcular media correctamente
+    for epoch_idx in range(max_epochs):  # Iterates main training loop over epochs
+        model.train()  # Activates training mode for dropout and any train-dependent layers
+        train_loss_sum = 0.0  # Accumulates total train loss to average at the end of the epoch
+        train_cls_loss_sum = 0.0  # Accumulates classification loss for logging when applicable
+        train_reg_loss_sum = 0.0  # Accumulates regression loss for logging when applicable
+        train_batches = 0  # Counts processed batches to compute mean correctly
 
-        for batch in train_loader:  # Itera DataLoader de train con tensores del pipeline multitarea
-            x_batch, y_batch, w_batch, _event_batch = _unpack_batch(batch=batch, device=device)  # Mueve batch al dispositivo y normaliza su forma
+        for batch in train_loader:  # Iterates train DataLoader with tensors from the multitask pipeline
+            x_batch, y_batch, w_batch, _event_batch = _unpack_batch(batch=batch, device=device)  # Moves batch to device and normalizes its shape
 
-            optimizer.zero_grad(set_to_none=True)  # Limpia gradientes previos de forma eficiente en memoria
-            if is_two_stage:  # Usa salida dict para modelo two-stage
-                model_output = model(x_batch)  # Ejecuta forward del modelo para obtener clasificador y regresor
-                if not isinstance(model_output, dict):  # Verifica la firma esperada del modelo two-stage
-                    raise TypeError("Model output must be a dict for TwoStageTCN")  # Lanza error claro si la firma de salida es incorrecta
-                loss = criterion(model_output, y_batch, w_batch)  # Calcula loss two-stage con dict de salidas
-                cls_loss_value = getattr(criterion, "last_cls_loss", None)  # Recupera loss de clasificacion guardada por la loss
-                reg_loss_value = getattr(criterion, "last_reg_loss", None)  # Recupera loss de regresion guardada por la loss
-                if cls_loss_value is None or reg_loss_value is None:  # Verifica que la loss expuso los componentes esperados
-                    raise RuntimeError("TwoStageLoss must expose last_cls_loss and last_reg_loss")  # Falla temprano si falta logging de componentes
-            else:  # Mantiene flujo clasico para modelos de regresion directa
-                y_pred = model(x_batch)  # Ejecuta forward del modelo para obtener prediccion continua del batch
-                if not isinstance(y_pred, torch.Tensor):  # Verifica la nueva firma esperada del modelo para evitar errores silenciosos
-                    raise TypeError("Model output must be a torch.Tensor")  # Lanza error claro si algun modelo devuelve una estructura no soportada
-                loss = criterion(y_pred, y_batch, w_batch)  # Calcula loss compuesta usando solo prediccion, target y pesos
+            optimizer.zero_grad(set_to_none=True)  # Clears previous gradients efficiently in memory
+            if is_two_stage:  # Uses dict output for two-stage model
+                model_output = model(x_batch)  # Runs model forward to obtain classifier and regressor
+                if not isinstance(model_output, dict):  # Verifies expected signature of the two-stage model
+                    raise TypeError("Model output must be a dict for TwoStageTCN")  # Raises clear error if output signature is incorrect
+                loss = criterion(model_output, y_batch, w_batch)  # Computes two-stage loss with output dict
+                cls_loss_value = getattr(criterion, "last_cls_loss", None)  # Recovers classification loss stored by the loss
+                reg_loss_value = getattr(criterion, "last_reg_loss", None)  # Recovers regression loss stored by the loss
+                if cls_loss_value is None or reg_loss_value is None:  # Verifies that the loss exposed the expected components
+                    raise RuntimeError("TwoStageLoss must expose last_cls_loss and last_reg_loss")  # Fails early if component logging is missing
+            else:  # Preserves classic flow for direct regression models
+                y_pred = model(x_batch)  # Runs model forward to obtain continuous batch prediction
+                if not isinstance(y_pred, torch.Tensor):  # Verifies new expected model signature to avoid silent errors
+                    raise TypeError("Model output must be a torch.Tensor")  # Raises clear error if any model returns an unsupported structure
+                loss = criterion(y_pred, y_batch, w_batch)  # Computes composite loss using only prediction, target, and weights
 
-            loss.backward()  # Ejecuta backpropagation para calcular gradientes
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip_max_norm)  # Aplica clipping para estabilizar entrenamiento
-            optimizer.step()  # Actualiza parametros del modelo con el optimizer
+            loss.backward()  # Runs backpropagation to compute gradients
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip_max_norm)  # Applies clipping to stabilize training
+            optimizer.step()  # Updates model parameters with the optimizer
 
-            train_loss_sum += float(loss.detach().item())  # Suma perdida escalar del batch para promedio de epoca
-            if is_two_stage:  # Acumula perdidas de clasificacion y regresion cuando aplica
-                train_cls_loss_sum += float(cls_loss_value.detach().item())  # Agrega loss de clasificacion del batch
-                train_reg_loss_sum += float(reg_loss_value.detach().item())  # Agrega loss de regresion del batch
-            train_batches += 1  # Incrementa contador de batches procesados
+            train_loss_sum += float(loss.detach().item())  # Adds scalar batch loss for epoch average
+            if is_two_stage:  # Accumulates classification and regression losses when applicable
+                train_cls_loss_sum += float(cls_loss_value.detach().item())  # Adds batch classification loss
+                train_reg_loss_sum += float(reg_loss_value.detach().item())  # Adds batch regression loss
+            train_batches += 1  # Increments processed batch counter
 
-        train_loss_epoch = train_loss_sum / max(train_batches, 1)  # Calcula perdida promedio de train evitando division por cero
-        train_cls_loss_epoch = train_cls_loss_sum / max(train_batches, 1)  # Calcula promedio de clasificacion si aplica
-        train_reg_loss_epoch = train_reg_loss_sum / max(train_batches, 1)  # Calcula promedio de regresion si aplica
+        train_loss_epoch = train_loss_sum / max(train_batches, 1)  # Computes average train loss while avoiding division by zero
+        train_cls_loss_epoch = train_cls_loss_sum / max(train_batches, 1)  # Computes mean classification loss if applicable
+        train_reg_loss_epoch = train_reg_loss_sum / max(train_batches, 1)  # Computes mean regression loss if applicable
 
-        model.eval()  # Activa modo evaluacion para medir generalizacion sin dropout
-        val_loss_sum = 0.0  # Acumula perdida total de validacion para promedio por epoca
-        val_cls_loss_sum = 0.0  # Acumula perdida de clasificacion en validacion si aplica
-        val_reg_loss_sum = 0.0  # Acumula perdida de regresion en validacion si aplica
-        val_batches = 0  # Cuenta batches de validacion para media robusta
-        with torch.no_grad():  # Desactiva gradientes para reducir memoria y acelerar validacion
-            for batch in val_loader:  # Itera DataLoader de validacion con la misma estructura de tensores
-                x_batch, y_batch, w_batch, _event_batch = _unpack_batch(batch=batch, device=device)  # Mueve batch a dispositivo y normaliza la firma
-                if is_two_stage:  # Usa salida dict para modelo two-stage
-                    model_output = model(x_batch)  # Ejecuta forward en validacion sin actualizar pesos
-                    if not isinstance(model_output, dict):  # Verifica firma de salida tambien en validacion para detectar inconsistencias pronto
-                        raise TypeError("Model output must be a dict for TwoStageTCN")  # Lanza error claro si la firma de salida es incorrecta
-                    loss = criterion(model_output, y_batch, w_batch)  # Calcula perdida de validacion con la misma funcion objetivo
-                    cls_loss_value = getattr(criterion, "last_cls_loss", None)  # Recupera loss de clasificacion del criterio
-                    reg_loss_value = getattr(criterion, "last_reg_loss", None)  # Recupera loss de regresion del criterio
-                    if cls_loss_value is None or reg_loss_value is None:  # Verifica que la loss expuso los componentes esperados
-                        raise RuntimeError("TwoStageLoss must expose last_cls_loss and last_reg_loss")  # Falla temprano si falta logging de componentes
-                else:  # Mantiene flujo clasico para modelos de regresion directa
-                    y_pred = model(x_batch)  # Ejecuta forward en validacion sin actualizar pesos
-                    if not isinstance(y_pred, torch.Tensor):  # Verifica firma de salida tambien en validacion para detectar inconsistencias pronto
-                        raise TypeError("Model output must be a torch.Tensor")  # Lanza error claro si la firma de salida es incorrecta
-                    loss = criterion(y_pred, y_batch, w_batch)  # Calcula perdida de validacion con la misma funcion objetivo
+        model.eval()  # Activates evaluation mode to measure generalization without dropout
+        val_loss_sum = 0.0  # Accumulates total validation loss for per-epoch average
+        val_cls_loss_sum = 0.0  # Accumulates validation classification loss if applicable
+        val_reg_loss_sum = 0.0  # Accumulates validation regression loss if applicable
+        val_batches = 0  # Counts validation batches for robust averaging
+        with torch.no_grad():  # Disables gradients to reduce memory and speed up validation
+            for batch in val_loader:  # Iterates validation DataLoader with the same tensor structure
+                x_batch, y_batch, w_batch, _event_batch = _unpack_batch(batch=batch, device=device)  # Moves batch to device and normalizes the signature
+                if is_two_stage:  # Uses dict output for two-stage model
+                    model_output = model(x_batch)  # Runs forward in validation without updating weights
+                    if not isinstance(model_output, dict):  # Verifies output signature in validation too to detect inconsistencies early
+                        raise TypeError("Model output must be a dict for TwoStageTCN")  # Raises clear error if output signature is incorrect
+                    loss = criterion(model_output, y_batch, w_batch)  # Computes validation loss with the same objective function
+                    cls_loss_value = getattr(criterion, "last_cls_loss", None)  # Recovers classification loss from the criterion
+                    reg_loss_value = getattr(criterion, "last_reg_loss", None)  # Recovers regression loss from the criterion
+                    if cls_loss_value is None or reg_loss_value is None:  # Verifies that the loss exposed the expected components
+                        raise RuntimeError("TwoStageLoss must expose last_cls_loss and last_reg_loss")  # Fails early if component logging is missing
+                else:  # Preserves classic flow for direct regression models
+                    y_pred = model(x_batch)  # Runs forward in validation without updating weights
+                    if not isinstance(y_pred, torch.Tensor):  # Verifies output signature in validation too to detect inconsistencies early
+                        raise TypeError("Model output must be a torch.Tensor")  # Raises clear error if output signature is incorrect
+                    loss = criterion(y_pred, y_batch, w_batch)  # Computes validation loss with the same objective function
 
-                val_loss_sum += float(loss.detach().item())  # Acumula perdida batch para promedio de epoca
-                if is_two_stage:  # Acumula perdidas de clasificacion y regresion cuando aplica
-                    val_cls_loss_sum += float(cls_loss_value.detach().item())  # Agrega loss de clasificacion del batch
-                    val_reg_loss_sum += float(reg_loss_value.detach().item())  # Agrega loss de regresion del batch
-                val_batches += 1  # Incrementa contador de batches de validacion
+                val_loss_sum += float(loss.detach().item())  # Accumulates batch loss for epoch average
+                if is_two_stage:  # Accumulates classification and regression losses when applicable
+                    val_cls_loss_sum += float(cls_loss_value.detach().item())  # Adds batch classification loss
+                    val_reg_loss_sum += float(reg_loss_value.detach().item())  # Adds batch regression loss
+                val_batches += 1  # Increments validation batch counter
 
-        val_loss_epoch = val_loss_sum / max(val_batches, 1)  # Calcula perdida promedio de validacion evitando division por cero
-        val_cls_loss_epoch = val_cls_loss_sum / max(val_batches, 1)  # Calcula promedio de clasificacion en validacion si aplica
-        val_reg_loss_epoch = val_reg_loss_sum / max(val_batches, 1)  # Calcula promedio de regresion en validacion si aplica
+        val_loss_epoch = val_loss_sum / max(val_batches, 1)  # Computes average validation loss while avoiding division by zero
+        val_cls_loss_epoch = val_cls_loss_sum / max(val_batches, 1)  # Computes mean validation classification loss if applicable
+        val_reg_loss_epoch = val_reg_loss_sum / max(val_batches, 1)  # Computes mean validation regression loss if applicable
 
-        scheduler.step(val_loss_epoch)  # Actualiza scheduler con metrica de validacion para adaptar LR
-        current_lr = float(optimizer.param_groups[0]["lr"])  # Obtiene LR actual para imprimir diagnostico por epoca
+        scheduler.step(val_loss_epoch)  # Updates scheduler with validation metric to adapt LR
+        current_lr = float(optimizer.param_groups[0]["lr"])  # Gets current LR to print per-epoch diagnostic
 
-        history["train_loss"].append(train_loss_epoch)  # Guarda train_loss en historia para analisis posterior
-        history["val_loss"].append(val_loss_epoch)  # Guarda val_loss en historia para analisis posterior
-        if is_two_stage:  # Guarda historia adicional para diagnostico two-stage
-            history["train_cls_loss"].append(train_cls_loss_epoch)  # Registra promedio de clasificacion en train
-            history["train_reg_loss"].append(train_reg_loss_epoch)  # Registra promedio de regresion en train
-            history["val_cls_loss"].append(val_cls_loss_epoch)  # Registra promedio de clasificacion en val
-            history["val_reg_loss"].append(val_reg_loss_epoch)  # Registra promedio de regresion en val
+        history["train_loss"].append(train_loss_epoch)  # Stores train_loss in history for later analysis
+        history["val_loss"].append(val_loss_epoch)  # Stores val_loss in history for later analysis
+        if is_two_stage:  # Stores additional history for two-stage diagnostics
+            history["train_cls_loss"].append(train_cls_loss_epoch)  # Records mean training classification loss
+            history["train_reg_loss"].append(train_reg_loss_epoch)  # Records mean training regression loss
+            history["val_cls_loss"].append(val_cls_loss_epoch)  # Records mean validation classification loss
+            history["val_reg_loss"].append(val_reg_loss_epoch)  # Records mean validation regression loss
 
-        improved = val_loss_epoch < (history["best_val_loss"] - early_stopping_min_delta)  # Exige mejora minima real para considerar una nueva mejor epoca
-        if improved:  # Actualiza tracking del mejor modelo cuando hay mejora sustantiva
-            history["best_val_loss"] = val_loss_epoch  # Registra nuevo mejor valor de validacion
-            history["best_epoch"] = epoch_idx + 1  # Guarda epoca (1-based) donde ocurrio la mejora
-            best_state_dict = deepcopy(model.state_dict())  # Guarda copia de pesos del mejor modelo actual
-            epochs_without_improvement = 0  # Reinicia contador de paciencia al mejorar
-        else:  # Maneja caso en que no hubo mejora sustantiva de validacion
-            epochs_without_improvement += 1  # Incrementa contador para criterio de early stopping
+        improved = val_loss_epoch < (history["best_val_loss"] - early_stopping_min_delta)  # Requires a real minimum improvement to accept a new best epoch
+        if improved:  # Updates tracking of the best model when there is meaningful improvement
+            history["best_val_loss"] = val_loss_epoch  # Records new best validation value
+            history["best_epoch"] = epoch_idx + 1  # Stores epoch (1-based) where improvement happened
+            best_state_dict = deepcopy(model.state_dict())  # Saves copy of the current best model weights
+            epochs_without_improvement = 0  # Resets patience counter when improving
+        else:  # Handles case where there was no meaningful validation improvement
+            epochs_without_improvement += 1  # Increments counter for early-stopping criterion
 
-        star_marker = " *" if improved else ""  # Marca visual ASCII cuando mejora la validacion
-        if is_two_stage:  # Imprime progreso extendido cuando el modelo es two-stage
-            print(  # Imprime progreso de cada epoca con total/cls/reg y LR
+        star_marker = " *" if improved else ""  # ASCII visual marker when validation improves
+        if is_two_stage:  # Prints extended progress when the model is two-stage
+            print(  # Prints per-epoch progress with total/cls/reg and LR
                 f"[train] Epoch {epoch_idx + 1:03d}/{max_epochs} | "
                 f"train_total={train_loss_epoch:.6f} | train_cls={train_cls_loss_epoch:.6f} | train_reg={train_reg_loss_epoch:.6f} | "
                 f"val_total={val_loss_epoch:.6f} | val_cls={val_cls_loss_epoch:.6f} | val_reg={val_reg_loss_epoch:.6f} | "
                 f"lr={current_lr:.6e}{star_marker}"
             )
-        else:  # Mantiene el formato de impresion original para modelos directos
-            print(  # Imprime progreso de cada epoca con metrica de train, val y LR
+        else:  # Keeps original print format for direct models
+            print(  # Prints per-epoch progress with train, val, and LR metrics
                 f"[train] Epoch {epoch_idx + 1:03d}/{max_epochs} | "
                 f"train_loss={train_loss_epoch:.6f} | val_loss={val_loss_epoch:.6f} | "
                 f"lr={current_lr:.6e}{star_marker}"
             )
 
-        if (epoch_idx + 1) < min_epochs:  # Impide parar antes de completar una fase minima de aprendizaje util
-            continue  # Salta la evaluacion de early stopping hasta cumplir el minimo de epocas
+        if (epoch_idx + 1) < min_epochs:  # Prevents stopping before a minimum useful learning phase is completed
+            continue  # Skips early-stopping evaluation until the minimum epoch count is reached
 
-        if epochs_without_improvement >= early_stopping_patience:  # Verifica condicion de parada temprana por paciencia agotada tras min_epochs
-            print(f"[train] Early stopping activado en epoch {epoch_idx + 1}")  # Informa activacion de early stopping en consola
-            break  # Detiene entrenamiento para evitar sobreajuste y ahorrar tiempo de computo
+        if epochs_without_improvement >= early_stopping_patience:  # Checks early-stopping condition after min_epochs
+            print(f"[train] Early stopping activated at epoch {epoch_idx + 1}")  # Reports early stopping activation in console
+            break  # Stops training to avoid overfitting and save compute time
 
-    model.load_state_dict(best_state_dict)  # Restaura mejores pesos encontrados durante entrenamiento
-    history["epochs_trained"] = len(history["train_loss"])  # Registra cuantas epocas se ejecutaron realmente para auditoria posterior
-    print(  # Resume resultado final tras restaurar el mejor estado
-        f"[train] Mejor epoch: {history['best_epoch']} | "
+    model.load_state_dict(best_state_dict)  # Restores best weights found during training
+    history["epochs_trained"] = len(history["train_loss"])  # Records how many epochs were actually run for later auditing
+    print(  # Summarizes final result after restoring best state
+        f"[train] Best epoch: {history['best_epoch']} | "
         f"best_val_loss={history['best_val_loss']:.6f} | "
         f"epochs_trained={history['epochs_trained']}"
     )
 
-    return history  # Devuelve historia completa para graficar curvas y auditar entrenamiento
+    return history  # Returns full history to plot curves and audit training
+
 
 def predict(
     model: nn.Module,
@@ -230,62 +231,60 @@ def predict(
     return_metadata: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray] | Tuple[np.ndarray, np.ndarray, Dict[str, np.ndarray]]:
     """Run inference over a loader and optionally return event metadata."""
-    resolved_device = torch.device(device)  # Normaliza dispositivo recibido para uso consistente en PyTorch
-    model = model.to(resolved_device)  # Mueve modelo al dispositivo de inferencia
-    model.eval()  # Activa modo evaluacion para desactivar dropout y fijar comportamiento del modelo
-    is_two_stage = isinstance(model, TwoStageTCN)  # Detecta si el modelo usa prediccion con switch duro
+    resolved_device = torch.device(device)  # Normalizes received device for consistent use in PyTorch
+    model = model.to(resolved_device)  # Moves model to inference device
+    model.eval()  # Activates evaluation mode to disable dropout and fix model behavior
+    is_two_stage = isinstance(model, TwoStageTCN)  # Detects whether the model uses hard-switch prediction
 
-    predictions: List[np.ndarray] = []  # Acumula predicciones batch a batch para concatenar al final
-    targets: List[np.ndarray] = []  # Acumula targets reales batch a batch para retorno final
-    event_targets: List[np.ndarray] = []  # Acumula etiquetas reales de evento si el usuario pide metadata
-    event_probabilities: List[np.ndarray] = []  # Acumula probabilidades de evento predichas para diagnostico posterior
+    predictions: List[np.ndarray] = []  # Accumulates predictions batch by batch to concatenate at the end
+    targets: List[np.ndarray] = []  # Accumulates real targets batch by batch for final return
+    event_targets: List[np.ndarray] = []  # Accumulates real event labels if the user requests metadata
+    event_probabilities: List[np.ndarray] = []  # Accumulates predicted event probabilities for later diagnostics
 
-    with torch.no_grad():  # Desactiva gradientes para inferencia eficiente y menor uso de memoria
-        for batch in data_loader:  # Consume loader con la estructura multitarea definida por el pipeline
-            x_batch, y_batch, _w_batch, event_batch = _unpack_batch(batch=batch, device=resolved_device)  # Reutiliza la logica comun para mover tensores al dispositivo
-            if is_two_stage:  # Usa prediccion con switch duro si el modelo es two-stage
-                y_pred = model.predict(x_batch, threshold=0.3)  # Ejecuta switch duro con umbral bajo para evitar falsos negativos
-                if not isinstance(y_pred, torch.Tensor):  # Verifica firma esperada de salida para inferencia robusta
-                    raise TypeError("Model predict must return a torch.Tensor")  # Lanza error claro si algun modelo devuelve una estructura no soportada
+    with torch.no_grad():  # Disables gradients for efficient inference and lower memory use
+        for batch in data_loader:  # Consumes loader with the multitask structure defined by the pipeline
+            x_batch, y_batch, _w_batch, event_batch = _unpack_batch(batch=batch, device=resolved_device)  # Reuses common logic to move tensors to device
+            if is_two_stage:  # Uses hard-switch prediction if the model is two-stage
+                y_pred = model.predict(x_batch, threshold=0.3)  # Runs hard switch with low threshold to avoid false negatives
+                if not isinstance(y_pred, torch.Tensor):  # Verifies expected output signature for robust inference
+                    raise TypeError("Model predict must return a torch.Tensor")  # Raises clear error if any model returns an unsupported structure
 
-                predictions.append(y_pred.detach().cpu().numpy().reshape(-1))  # Convierte prediccion a numpy 1D y acumula
-                targets.append(y_batch.detach().cpu().numpy().reshape(-1))  # Convierte target a numpy 1D y acumula
+                predictions.append(y_pred.detach().cpu().numpy().reshape(-1))  # Converts prediction to 1D numpy and accumulates it
+                targets.append(y_batch.detach().cpu().numpy().reshape(-1))  # Converts target to 1D numpy and accumulates it
 
-                if return_metadata:  # Solo acumula metadata adicional cuando el llamador la necesita explicitamente
-                    model_output = model(x_batch)  # Ejecuta forward adicional para recuperar probabilidad de evento
-                    if not isinstance(model_output, dict):  # Verifica firma esperada de salida para metadata two-stage
-                        raise TypeError("Model output must be a dict for TwoStageTCN")  # Lanza error claro si la firma de salida es incorrecta
-                    cls_prob = model_output.get("cls_prob")  # Extrae probabilidad de evento desde la salida dict
-                    if cls_prob is None:  # Verifica que exista la clave esperada
-                        raise KeyError("model_output must contain 'cls_prob'")  # Falla claro si falta la probabilidad de evento
-                    event_targets.append(event_batch.detach().cpu().numpy().reshape(-1))  # Guarda etiqueta real de evento alineada con cada target
-                    event_probabilities.append(cls_prob.detach().cpu().numpy().reshape(-1))  # Guarda probabilidad predicha por el clasificador
-            else:  # Mantiene flujo original para modelos de regresion directa
-                y_pred = model(x_batch)  # Ejecuta forward del modelo para obtener predicciones del batch
-                if not isinstance(y_pred, torch.Tensor):  # Verifica firma esperada de salida para inferencia robusta
-                    raise TypeError("Model output must be a torch.Tensor")  # Lanza error claro si algun modelo devuelve una estructura no soportada
+                if return_metadata:  # Only accumulates extra metadata when the caller explicitly needs it
+                    model_output = model(x_batch)  # Runs an additional forward pass to recover event probability
+                    if not isinstance(model_output, dict):  # Verifies expected output signature for two-stage metadata
+                        raise TypeError("Model output must be a dict for TwoStageTCN")  # Raises clear error if output signature is incorrect
+                    cls_prob = model_output.get("cls_prob")  # Extracts event probability from dict output
+                    if cls_prob is None:  # Verifies that the expected key exists
+                        raise KeyError("model_output must contain 'cls_prob'")  # Fails clearly if event probability is missing
+                    event_targets.append(event_batch.detach().cpu().numpy().reshape(-1))  # Stores real event label aligned with each target
+                    event_probabilities.append(cls_prob.detach().cpu().numpy().reshape(-1))  # Stores probability predicted by the classifier
+            else:  # Preserves original flow for direct regression models
+                y_pred = model(x_batch)  # Runs model forward to obtain batch predictions
+                if not isinstance(y_pred, torch.Tensor):  # Verifies expected output signature for robust inference
+                    raise TypeError("Model output must be a torch.Tensor")  # Raises clear error if any model returns an unsupported structure
 
-                predictions.append(y_pred.detach().cpu().numpy().reshape(-1))  # Convierte prediccion a numpy 1D y acumula
-                targets.append(y_batch.detach().cpu().numpy().reshape(-1))  # Convierte target a numpy 1D y acumula
+                predictions.append(y_pred.detach().cpu().numpy().reshape(-1))  # Converts prediction to 1D numpy and accumulates it
+                targets.append(y_batch.detach().cpu().numpy().reshape(-1))  # Converts target to 1D numpy and accumulates it
 
-                if return_metadata:  # Solo acumula metadata adicional cuando el llamador la necesita explicitamente
-                    event_targets.append(event_batch.detach().cpu().numpy().reshape(-1))  # Guarda etiqueta real de evento alineada con cada target
-                    event_probabilities.append(np.zeros_like(y_pred.detach().cpu().numpy().reshape(-1), dtype=np.float32))  # Mantiene compatibilidad devolviendo probabilidad nula al no existir cabeza de evento
+                if return_metadata:  # Only accumulates extra metadata when the caller explicitly needs it
+                    event_targets.append(event_batch.detach().cpu().numpy().reshape(-1))  # Stores real event label aligned with each target
+                    event_probabilities.append(np.zeros_like(y_pred.detach().cpu().numpy().reshape(-1), dtype=np.float32))  # Preserves compatibility by returning zero probability when no event head exists
 
-    if predictions:  # Verifica que haya al menos un batch antes de concatenar
-        y_pred_array = np.concatenate(predictions, axis=0)  # Concatena todas las predicciones en un vector continuo
-        y_real_array = np.concatenate(targets, axis=0)  # Concatena todos los targets en un vector continuo
-    else:  # Maneja caso de loader vacio sin muestras disponibles
-        y_pred_array = np.empty((0,), dtype=np.float32)  # Retorna arreglo vacio de predicciones si no hubo datos
-        y_real_array = np.empty((0,), dtype=np.float32)  # Retorna arreglo vacio de targets si no hubo datos
+    if predictions:  # Checks that there is at least one batch before concatenating
+        y_pred_array = np.concatenate(predictions, axis=0)  # Concatenates all predictions into one continuous vector
+        y_real_array = np.concatenate(targets, axis=0)  # Concatenates all targets into one continuous vector
+    else:  # Handles empty loader case with no available samples
+        y_pred_array = np.empty((0,), dtype=np.float32)  # Returns empty prediction array if there was no data
+        y_real_array = np.empty((0,), dtype=np.float32)  # Returns empty target array if there was no data
 
-    if not return_metadata:  # Mantiene firma simple cuando el usuario no necesita informacion adicional
-        return y_pred_array, y_real_array  # Devuelve pares numpy para metrica y analisis posterior
+    if not return_metadata:  # Preserves simple signature when the user does not need extra information
+        return y_pred_array, y_real_array  # Returns numpy pairs for metrics and later analysis
 
-    metadata: Dict[str, np.ndarray] = {  # Prepara contenedor estructurado para metadata alineada muestra a muestra
-        "event_targets": np.concatenate(event_targets, axis=0) if event_targets else np.empty((0,), dtype=np.float32),  # Devuelve mascara real de evento si existia en el loader
-        "event_probabilities": np.concatenate(event_probabilities, axis=0) if event_probabilities else np.empty((0,), dtype=np.float32),  # Devuelve vector nulo para mantener compatibilidad con consumidores existentes
+    metadata: Dict[str, np.ndarray] = {  # Prepares structured container for sample-aligned metadata
+        "event_targets": np.concatenate(event_targets, axis=0) if event_targets else np.empty((0,), dtype=np.float32),  # Returns real event mask if it existed in the loader
+        "event_probabilities": np.concatenate(event_probabilities, axis=0) if event_probabilities else np.empty((0,), dtype=np.float32),  # Returns zero vector to preserve compatibility with existing consumers
     }
-    return y_pred_array, y_real_array, metadata  # Devuelve predicciones, targets y metadata auxiliar para evaluacion avanzada
-
-
+    return y_pred_array, y_real_array, metadata  # Returns predictions, targets, and auxiliary metadata for advanced evaluation

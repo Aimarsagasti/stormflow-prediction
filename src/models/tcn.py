@@ -1,41 +1,41 @@
 """TCN model definitions for stormflow prediction."""
 
-from __future__ import annotations  # Permite anotaciones modernas de tipos sin problemas de version
+from __future__ import annotations  # Allows modern type annotations without version issues
 
-from typing import List, Sequence  # Define tipos para listas de canales y dilataciones
+from typing import List, Sequence  # Defines types for channel and dilation lists
 
-import torch  # Provee tensores y operaciones base para el modelo
-from torch import nn  # Incluye modulos de red neuronal en PyTorch
+import torch  # Provides tensors and base operations for the model
+from torch import nn  # Includes neural network modules in PyTorch
 
 
 class CausalConv1d(nn.Module):
     """1D causal convolution implemented with left padding and right trimming."""
 
     def __init__(self, in_channels: int, out_channels: int, kernel_size: int, dilation: int) -> None:
-        super().__init__()  # Inicializa correctamente la clase base nn.Module
-        self.causal_padding = (kernel_size - 1) * dilation  # Calcula padding total necesario para mantener causalidad
-        self.conv = nn.Conv1d(  # Define convolucion 1D con dilatacion para ampliar campo receptivo
-            in_channels=in_channels,  # Define numero de canales de entrada del bloque
-            out_channels=out_channels,  # Define numero de canales de salida del bloque
-            kernel_size=kernel_size,  # Define tamano de kernel temporal
-            dilation=dilation,  # Define separacion entre elementos del kernel para cubrir mas historia
-            padding=self.causal_padding,  # Aplica padding simetrico y luego se recorta para dejar solo informacion pasada
+        super().__init__()  # Properly initializes the base nn.Module class
+        self.causal_padding = (kernel_size - 1) * dilation  # Computes total padding needed to preserve causality
+        self.conv = nn.Conv1d(  # Defines 1D convolution with dilation to expand receptive field
+            in_channels=in_channels,  # Defines number of input channels for the block
+            out_channels=out_channels,  # Defines number of output channels for the block
+            kernel_size=kernel_size,  # Defines temporal kernel size
+            dilation=dilation,  # Defines spacing between kernel elements to cover more history
+            padding=self.causal_padding,  # Applies symmetric padding and then trims to keep only past information
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.conv(x)  # Ejecuta convolucion temporal sobre la secuencia
-        if self.causal_padding > 0:  # Verifica si hace falta recorte para mantener longitud y causalidad
-            x = x[:, :, :-self.causal_padding]  # Elimina posiciones futuras introducidas por el padding derecho
-        return x  # Devuelve salida causal con la misma longitud temporal que la entrada
+        x = self.conv(x)  # Runs temporal convolution over the sequence
+        if self.causal_padding > 0:  # Checks whether trimming is needed to preserve length and causality
+            x = x[:, :, :-self.causal_padding]  # Removes future positions introduced by right padding
+        return x  # Returns causal output with the same temporal length as the input
 
 
 def _build_group_norm(num_channels: int) -> nn.GroupNorm:
     """Build GroupNorm with a valid number of groups for the channel count."""
-    candidate_groups = [8, 4, 2, 1]  # Prueba grupos tipicos para mantener normalizacion estable sin depender del batch
-    for num_groups in candidate_groups:  # Recorre posibles grupos hasta encontrar uno compatible con los canales actuales
-        if num_channels % num_groups == 0:  # Verifica divisibilidad exacta requerida por GroupNorm
-            return nn.GroupNorm(num_groups=num_groups, num_channels=num_channels)  # Devuelve normalizacion estable para el ancho actual
-    return nn.GroupNorm(num_groups=1, num_channels=num_channels)  # Fallback seguro equivalente a LayerNorm por canal
+    candidate_groups = [8, 4, 2, 1]  # Tries common groups to keep normalization stable without depending on batch size
+    for num_groups in candidate_groups:  # Iterates through possible groups until it finds one compatible with the current channels
+        if num_channels % num_groups == 0:  # Checks exact divisibility required by GroupNorm
+            return nn.GroupNorm(num_groups=num_groups, num_channels=num_channels)  # Returns stable normalization for the current width
+    return nn.GroupNorm(num_groups=1, num_channels=num_channels)  # Safe fallback equivalent to channel-wise LayerNorm
 
 
 class TCNResidualBlock(nn.Module):
@@ -49,50 +49,50 @@ class TCNResidualBlock(nn.Module):
         dilation: int,
         dropout: float,
     ) -> None:
-        super().__init__()  # Inicializa estructura base del bloque residual
-        self.conv1 = CausalConv1d(  # Primera convolucion causal dilatada del bloque
-            in_channels=in_channels,  # Recibe canales de entrada del bloque
-            out_channels=out_channels,  # Proyecta al numero de canales objetivo del bloque
-            kernel_size=kernel_size,  # Usa kernel definido para toda la arquitectura
-            dilation=dilation,  # Usa dilatacion del bloque para cubrir diferente escala temporal
+        super().__init__()  # Initializes base structure of the residual block
+        self.conv1 = CausalConv1d(  # First dilated causal convolution in the block
+            in_channels=in_channels,  # Receives input channels for the block
+            out_channels=out_channels,  # Projects to the block target channel count
+            kernel_size=kernel_size,  # Uses kernel defined for the whole architecture
+            dilation=dilation,  # Uses this block's dilation to cover a different temporal scale
         )
-        self.norm1 = _build_group_norm(out_channels)  # Normaliza por grupos para evitar drift con batches no representativos
-        self.relu1 = nn.ReLU()  # Introduce no linealidad tras la primera convolucion
-        self.drop1 = nn.Dropout(dropout)  # Regulariza activaciones para reducir sobreajuste
+        self.norm1 = _build_group_norm(out_channels)  # Normalizes by groups to avoid drift with unrepresentative batches
+        self.relu1 = nn.ReLU()  # Introduces nonlinearity after the first convolution
+        self.drop1 = nn.Dropout(dropout)  # Regularizes activations to reduce overfitting
 
-        self.conv2 = CausalConv1d(  # Segunda convolucion causal dilatada del bloque
-            in_channels=out_channels,  # Usa salida intermedia como nueva entrada del bloque
-            out_channels=out_channels,  # Mantiene dimensionalidad para sumar con el skip connection
-            kernel_size=kernel_size,  # Repite tamano de kernel del bloque
-            dilation=dilation,  # Repite dilatacion para consistencia multiescala dentro del bloque
+        self.conv2 = CausalConv1d(  # Second dilated causal convolution in the block
+            in_channels=out_channels,  # Uses intermediate output as the new block input
+            out_channels=out_channels,  # Keeps dimensionality so it can be added to the skip connection
+            kernel_size=kernel_size,  # Repeats block kernel size
+            dilation=dilation,  # Repeats dilation for multiscale consistency inside the block
         )
-        self.norm2 = _build_group_norm(out_channels)  # Repite GroupNorm para estabilizar la segunda transformacion del bloque
-        self.relu2 = nn.ReLU()  # Aplica no linealidad en segunda transformacion
-        self.drop2 = nn.Dropout(dropout)  # Aplica regularizacion adicional en la segunda capa
+        self.norm2 = _build_group_norm(out_channels)  # Repeats GroupNorm to stabilize the second block transformation
+        self.relu2 = nn.ReLU()  # Applies nonlinearity in the second transformation
+        self.drop2 = nn.Dropout(dropout)  # Applies additional regularization in the second layer
 
-        if in_channels != out_channels:  # Revisa si el residual requiere ajustar cantidad de canales
-            self.skip_proj = nn.Conv1d(in_channels, out_channels, kernel_size=1)  # Proyecta residual con Conv1x1 cuando cambian canales
-        else:  # Usa atajo identidad cuando las dimensiones ya coinciden
-            self.skip_proj = nn.Identity()  # Evita costo extra si no hace falta proyeccion
+        if in_channels != out_channels:  # Checks whether the residual needs channel adjustment
+            self.skip_proj = nn.Conv1d(in_channels, out_channels, kernel_size=1)  # Projects residual with Conv1x1 when channels change
+        else:  # Uses identity shortcut when dimensions already match
+            self.skip_proj = nn.Identity()  # Avoids extra cost if no projection is needed
 
-        self.out_relu = nn.ReLU()  # Activa salida combinada residual para mantener estabilidad y no linealidad final
+        self.out_relu = nn.ReLU()  # Activates combined residual output to maintain stability and final nonlinearity
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        residual = self.skip_proj(x)  # Construye rama residual alineada en canales con la salida principal
+        residual = self.skip_proj(x)  # Builds residual branch aligned in channels with the main output
 
-        out = self.conv1(x)  # Ejecuta primera convolucion causal
-        out = self.norm1(out)  # Normaliza salida de la primera convolucion sin depender del batch
-        out = self.relu1(out)  # Activa salida intermedia para modelar relaciones no lineales
-        out = self.drop1(out)  # Aplica dropout en activaciones intermedias
+        out = self.conv1(x)  # Runs first causal convolution
+        out = self.norm1(out)  # Normalizes first convolution output without depending on batch statistics
+        out = self.relu1(out)  # Activates intermediate output to model nonlinear relationships
+        out = self.drop1(out)  # Applies dropout to intermediate activations
 
-        out = self.conv2(out)  # Ejecuta segunda convolucion causal del bloque
-        out = self.norm2(out)  # Normaliza segunda salida convolucional con GroupNorm
-        out = self.relu2(out)  # Activa segunda salida intermedia
-        out = self.drop2(out)  # Aplica dropout final antes de la suma residual
+        out = self.conv2(out)  # Runs second causal convolution in the block
+        out = self.norm2(out)  # Normalizes second convolution output with GroupNorm
+        out = self.relu2(out)  # Activates second intermediate output
+        out = self.drop2(out)  # Applies final dropout before residual addition
 
-        out = out + residual  # Suma rama principal y residual para facilitar flujo de gradiente
-        out = self.out_relu(out)  # Aplica activacion final tras la fusion residual
-        return out  # Devuelve salida del bloque con misma longitud temporal
+        out = out + residual  # Adds main and residual branches to ease gradient flow
+        out = self.out_relu(out)  # Applies final activation after residual fusion
+        return out  # Returns block output with the same temporal length
 
 
 class StormflowTCN(nn.Module):
@@ -106,76 +106,76 @@ class StormflowTCN(nn.Module):
         kernel_size: int = 3,
         dropout: float = 0.2,
     ) -> None:
-        super().__init__()  # Inicializa la clase base para registrar submodulos correctamente
-        self.n_features = n_features  # Guarda numero de features de entrada para referencia y depuracion
-        self.num_channels = list(num_channels) if num_channels is not None else [32, 64, 64, 64, 32]  # Define canales por bloque segun propuesta
-        self.dilations = list(dilations) if dilations is not None else [1, 2, 4, 8, 16]  # Define dilataciones por bloque segun propuesta
-        self.kernel_size = kernel_size  # Guarda kernel temporal para metodos de campo receptivo
-        self.dropout = dropout  # Guarda dropout global para bloques y cabeza de regresion
+        super().__init__()  # Initializes the base class to register submodules correctly
+        self.n_features = n_features  # Stores number of input features for reference and debugging
+        self.num_channels = list(num_channels) if num_channels is not None else [32, 64, 64, 64, 32]  # Defines channels per block according to the proposal
+        self.dilations = list(dilations) if dilations is not None else [1, 2, 4, 8, 16]  # Defines dilations per block according to the proposal
+        self.kernel_size = kernel_size  # Stores temporal kernel size for receptive-field methods
+        self.dropout = dropout  # Stores global dropout for blocks and regression head
 
-        if len(self.num_channels) != len(self.dilations):  # Verifica consistencia entre numero de bloques y dilataciones
-            raise ValueError("num_channels and dilations must have the same length")  # Lanza error claro si hay configuracion inconsistente
+        if len(self.num_channels) != len(self.dilations):  # Verifies consistency between number of blocks and dilations
+            raise ValueError("num_channels and dilations must have the same length")  # Raises a clear error if configuration is inconsistent
 
-        self.input_projection = nn.Conv1d(  # Proyecta features de entrada a canales iniciales de la TCN
-            in_channels=n_features,  # Recibe numero de features por timestamp
-            out_channels=self.num_channels[0],  # Mapea al ancho del primer bloque residual
-            kernel_size=1,  # Usa Conv1x1 para mezclar features sin alterar longitud temporal
+        self.input_projection = nn.Conv1d(  # Projects input features into initial TCN channels
+            in_channels=n_features,  # Receives number of features per timestamp
+            out_channels=self.num_channels[0],  # Maps to the width of the first residual block
+            kernel_size=1,  # Uses Conv1x1 to mix features without altering temporal length
         )
 
-        blocks: List[nn.Module] = []  # Acumula bloques residuales para construir la red temporal
-        in_channels = self.num_channels[0]  # Inicializa canales de entrada del primer bloque
-        for out_channels, dilation in zip(self.num_channels, self.dilations):  # Recorre canales y dilataciones definidos por bloque
-            block = TCNResidualBlock(  # Crea bloque residual causal para la escala temporal actual
-                in_channels=in_channels,  # Usa ancho actual de la representacion temporal
-                out_channels=out_channels,  # Configura ancho de salida del bloque
-                kernel_size=self.kernel_size,  # Usa kernel comun a toda la arquitectura
-                dilation=dilation,  # Usa dilatacion especifica del bloque
-                dropout=self.dropout,  # Usa dropout definido a nivel de modelo
+        blocks: List[nn.Module] = []  # Accumulates residual blocks to build the temporal network
+        in_channels = self.num_channels[0]  # Initializes input channels of the first block
+        for out_channels, dilation in zip(self.num_channels, self.dilations):  # Iterates through channels and dilations defined per block
+            block = TCNResidualBlock(  # Creates residual causal block for the current temporal scale
+                in_channels=in_channels,  # Uses current temporal representation width
+                out_channels=out_channels,  # Configures block output width
+                kernel_size=self.kernel_size,  # Uses kernel shared across the whole architecture
+                dilation=dilation,  # Uses block-specific dilation
+                dropout=self.dropout,  # Uses model-level dropout
             )
-            blocks.append(block)  # Agrega bloque creado a la lista secuencial
-            in_channels = out_channels  # Actualiza canales de entrada para el siguiente bloque
-        self.tcn_blocks = nn.Sequential(*blocks)  # Empaqueta bloques en una secuencia ejecutable
+            blocks.append(block)  # Adds the created block to the sequential list
+            in_channels = out_channels  # Updates input channels for the next block
+        self.tcn_blocks = nn.Sequential(*blocks)  # Packs blocks into an executable sequence
 
-        final_channels = self.num_channels[-1]  # Obtiene canales finales tras el ultimo bloque TCN
-        self.regression_head = nn.Sequential(  # Define MLP final para mapear estado causal a prediccion escalar
-            nn.Linear(final_channels, 128),  # Proyecta estado final a un espacio intermedio con mayor capacidad
-            nn.ReLU(),  # Introduce no linealidad para aprender relaciones hidrologicas complejas
-            nn.Dropout(self.dropout),  # Regulariza activaciones intermedias para reducir sobreajuste
-            nn.Linear(128, 64),  # Reduce dimensionalidad para estabilizar la etapa final de regresion
-            nn.ReLU(),  # Introduce una segunda no linealidad antes de la salida
-            nn.Dropout(self.dropout),  # Aplica regularizacion adicional antes de la capa final
-            nn.Linear(64, 1),  # Produce una sola prediccion continua de stormflow en el horizonte
+        final_channels = self.num_channels[-1]  # Gets final channels after the last TCN block
+        self.regression_head = nn.Sequential(  # Defines final MLP to map causal state to scalar prediction
+            nn.Linear(final_channels, 128),  # Projects final state into a larger intermediate space
+            nn.ReLU(),  # Introduces nonlinearity to learn complex hydrologic relationships
+            nn.Dropout(self.dropout),  # Regularizes intermediate activations to reduce overfitting
+            nn.Linear(128, 64),  # Reduces dimensionality to stabilize the final regression stage
+            nn.ReLU(),  # Introduces a second nonlinearity before output
+            nn.Dropout(self.dropout),  # Applies additional regularization before the final layer
+            nn.Linear(64, 1),  # Produces a single continuous stormflow prediction at the horizon
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if x.ndim != 3:  # Valida forma esperada (batch, seq_length, n_features)
-            raise ValueError("Input tensor must have shape (batch, seq_length, n_features)")  # Mensaje claro para depurar entradas mal formadas
+        if x.ndim != 3:  # Validates expected shape (batch, seq_length, n_features)
+            raise ValueError("Input tensor must have shape (batch, seq_length, n_features)")  # Clear message to debug malformed inputs
 
-        x = x.transpose(1, 2)  # Reordena a (batch, n_features, seq_length) para Conv1d de PyTorch
-        x = self.input_projection(x)  # Proyecta features de entrada al espacio de canales de la TCN
-        x = self.tcn_blocks(x)  # Procesa secuencia con bloques residuales causales multiescala
+        x = x.transpose(1, 2)  # Reorders to (batch, n_features, seq_length) for PyTorch Conv1d
+        x = self.input_projection(x)  # Projects input features into the TCN channel space
+        x = self.tcn_blocks(x)  # Processes sequence with multiscale causal residual blocks
 
-        last_state = x[:, :, -1]  # Conserva el ultimo timestep causal como resumen del estado mas reciente
-        stormflow_prediction = self.regression_head(last_state)  # Genera prediccion escalar directa sin cabeza de evento ni gating
-        return stormflow_prediction  # Devuelve tensor (batch, 1) para entrenamiento de regresion directa
+        last_state = x[:, :, -1]  # Keeps the last causal timestep as a summary of the most recent state
+        stormflow_prediction = self.regression_head(last_state)  # Generates direct scalar prediction without event head or gating
+        return stormflow_prediction  # Returns tensor (batch, 1) for direct regression training
 
     def compute_receptive_field(self, print_result: bool = True) -> int:
-        receptive_field = 1  # Inicializa campo receptivo en 1 para el timestep actual
-        for dilation in self.dilations:  # Recorre cada bloque para acumular cobertura temporal total
-            receptive_field += 2 * (self.kernel_size - 1) * dilation  # Suma aporte de dos convoluciones por bloque
-        if print_result:  # Permite imprimir o solo devolver el valor segun necesidad del usuario
-            print(f"[tcn] Campo receptivo: {receptive_field} timesteps")  # Reporta campo receptivo total en pasos de tiempo
-        return receptive_field  # Devuelve cobertura temporal efectiva del modelo
+        receptive_field = 1  # Initializes receptive field at 1 for the current timestep
+        for dilation in self.dilations:  # Iterates through each block to accumulate total temporal coverage
+            receptive_field += 2 * (self.kernel_size - 1) * dilation  # Adds contribution of two convolutions per block
+        if print_result:  # Lets the caller print or only return the value as needed
+            print(f"[tcn] Receptive field: {receptive_field} timesteps")  # Reports total receptive field in timesteps
+        return receptive_field  # Returns effective temporal coverage of the model
 
     def count_parameters(self, print_result: bool = True) -> int:
-        trainable_params = sum(parameter.numel() for parameter in self.parameters() if parameter.requires_grad)  # Cuenta parametros entrenables para estimar complejidad
-        if print_result:  # Controla si se imprime diagnostico o solo se retorna el valor
-            print(f"[tcn] Parametros entrenables: {trainable_params:,}")  # Muestra total de parametros con separador para legibilidad
-        return trainable_params  # Retorna cantidad total de parametros entrenables
+        trainable_params = sum(parameter.numel() for parameter in self.parameters() if parameter.requires_grad)  # Counts trainable parameters to estimate complexity
+        if print_result:  # Controls whether to print a diagnostic or only return the value
+            print(f"[tcn] Trainable parameters: {trainable_params:,}")  # Shows total parameter count with separator for readability
+        return trainable_params  # Returns total number of trainable parameters
 
 
 class TwoStageTCN(nn.Module):
-    """Modelo Two-Stage con backbone compartido y dos cabezas\."""
+    """Two-stage model with shared backbone and two heads."""
 
     def __init__(
         self,
@@ -185,85 +185,83 @@ class TwoStageTCN(nn.Module):
         kernel_size: int = 3,
         dropout: float = 0.2,
     ) -> None:
-        super().__init__()  # Inicializa la clase base para registrar submodulos correctamente
-        self.n_features = n_features  # Guarda numero de features de entrada para referencia y depuracion
-        self.num_channels = list(num_channels) if num_channels is not None else [32, 64, 64, 64, 32]  # Define canales por bloque segun propuesta
-        self.dilations = list(dilations) if dilations is not None else [1, 2, 4, 8, 16]  # Define dilataciones por bloque segun propuesta
-        self.kernel_size = kernel_size  # Guarda kernel temporal para metodos de campo receptivo
-        self.dropout = dropout  # Guarda dropout global para bloques y cabezas del modelo
+        super().__init__()  # Initializes the base class to register submodules correctly
+        self.n_features = n_features  # Stores number of input features for reference and debugging
+        self.num_channels = list(num_channels) if num_channels is not None else [32, 64, 64, 64, 32]  # Defines channels per block according to the proposal
+        self.dilations = list(dilations) if dilations is not None else [1, 2, 4, 8, 16]  # Defines dilations per block according to the proposal
+        self.kernel_size = kernel_size  # Stores temporal kernel size for receptive-field methods
+        self.dropout = dropout  # Stores global dropout for blocks and model heads
 
-        if len(self.num_channels) != len(self.dilations):  # Verifica consistencia entre numero de bloques y dilataciones
-            raise ValueError("num_channels and dilations must have the same length")  # Lanza error claro si hay configuracion inconsistente
+        if len(self.num_channels) != len(self.dilations):  # Verifies consistency between number of blocks and dilations
+            raise ValueError("num_channels and dilations must have the same length")  # Raises a clear error if configuration is inconsistent
 
-        self.input_projection = nn.Conv1d(  # Proyecta features de entrada a canales iniciales de la TCN
-            in_channels=n_features,  # Recibe numero de features por timestamp
-            out_channels=self.num_channels[0],  # Mapea al ancho del primer bloque residual
-            kernel_size=1,  # Usa Conv1x1 para mezclar features sin alterar longitud temporal
+        self.input_projection = nn.Conv1d(  # Projects input features into initial TCN channels
+            in_channels=n_features,  # Receives number of features per timestamp
+            out_channels=self.num_channels[0],  # Maps to the width of the first residual block
+            kernel_size=1,  # Uses Conv1x1 to mix features without altering temporal length
         )
 
-        blocks: List[nn.Module] = []  # Acumula bloques residuales para construir la red temporal compartida
-        in_channels = self.num_channels[0]  # Inicializa canales de entrada del primer bloque
-        for out_channels, dilation in zip(self.num_channels, self.dilations):  # Recorre canales y dilataciones definidos por bloque
-            block = TCNResidualBlock(  # Crea bloque residual causal para la escala temporal actual
-                in_channels=in_channels,  # Usa ancho actual de la representacion temporal
-                out_channels=out_channels,  # Configura ancho de salida del bloque
-                kernel_size=self.kernel_size,  # Usa kernel comun a toda la arquitectura
-                dilation=dilation,  # Usa dilatacion especifica del bloque
-                dropout=self.dropout,  # Usa dropout definido a nivel de modelo
+        blocks: List[nn.Module] = []  # Accumulates residual blocks to build the shared temporal network
+        in_channels = self.num_channels[0]  # Initializes input channels of the first block
+        for out_channels, dilation in zip(self.num_channels, self.dilations):  # Iterates through channels and dilations defined per block
+            block = TCNResidualBlock(  # Creates residual causal block for the current temporal scale
+                in_channels=in_channels,  # Uses current temporal representation width
+                out_channels=out_channels,  # Configures block output width
+                kernel_size=self.kernel_size,  # Uses kernel shared across the whole architecture
+                dilation=dilation,  # Uses block-specific dilation
+                dropout=self.dropout,  # Uses model-level dropout
             )
-            blocks.append(block)  # Agrega bloque creado a la lista secuencial
-            in_channels = out_channels  # Actualiza canales de entrada para el siguiente bloque
-        self.tcn_blocks = nn.Sequential(*blocks)  # Empaqueta bloques en una secuencia ejecutable
+            blocks.append(block)  # Adds the created block to the sequential list
+            in_channels = out_channels  # Updates input channels for the next block
+        self.tcn_blocks = nn.Sequential(*blocks)  # Packs blocks into an executable sequence
 
-        final_channels = self.num_channels[-1]  # Obtiene canales finales tras el ultimo bloque TCN
-        self.classifier_head = nn.Sequential(  # Define cabeza binaria para detectar presencia de evento
-            nn.Linear(final_channels, 64),  # Expande estado causal para una decision binaria mas estable
-            nn.ReLU(),  # Introduce no linealidad para separar eventos de no-eventos
-            nn.Dropout(self.dropout),  # Regulariza la cabeza para reducir sobreajuste en clases raras
-            nn.Linear(64, 1),  # Proyecta a un logit/score escalar por muestra
-            nn.Sigmoid(),  # Convierte score a probabilidad de evento en [0, 1]
+        final_channels = self.num_channels[-1]  # Gets final channels after the last TCN block
+        self.classifier_head = nn.Sequential(  # Defines binary head to detect event presence
+            nn.Linear(final_channels, 64),  # Expands causal state for a more stable binary decision
+            nn.ReLU(),  # Introduces nonlinearity to separate events from non-events
+            nn.Dropout(self.dropout),  # Regularizes the head to reduce overfitting on rare classes
+            nn.Linear(64, 1),  # Projects to one scalar logit/score per sample
+            nn.Sigmoid(),  # Converts score into event probability in [0, 1]
         )
-        self.regressor_head = nn.Sequential(  # Define cabeza de regresion para magnitud de stormflow
-            nn.Linear(final_channels, 128),  # Aumenta capacidad para modelar magnitudes extremas
-            nn.ReLU(),  # Introduce no linealidad para capturar relacion lluvia->magnitud
-            nn.Dropout(self.dropout),  # Regulariza activaciones para evitar sobreajuste
-            nn.Linear(128, 64),  # Reduce dimensionalidad manteniendo capacidad suficiente
-            nn.ReLU(),  # Aplica no linealidad adicional antes de la salida
-            nn.Linear(64, 1),  # Produce una sola prediccion continua de stormflow
+        self.regressor_head = nn.Sequential(  # Defines regression head for stormflow magnitude
+            nn.Linear(final_channels, 128),  # Increases capacity to model extreme magnitudes
+            nn.ReLU(),  # Introduces nonlinearity to capture the rainfall->magnitude relationship
+            nn.Dropout(self.dropout),  # Regularizes activations to avoid overfitting
+            nn.Linear(128, 64),  # Reduces dimensionality while keeping enough capacity
+            nn.ReLU(),  # Applies additional nonlinearity before output
+            nn.Linear(64, 1),  # Produces a single continuous stormflow prediction
         )
 
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
-        if x.ndim != 3:  # Valida forma esperada (batch, seq_length, n_features)
-            raise ValueError("Input tensor must have shape (batch, seq_length, n_features)")  # Mensaje claro para depurar entradas mal formadas
+        if x.ndim != 3:  # Validates expected shape (batch, seq_length, n_features)
+            raise ValueError("Input tensor must have shape (batch, seq_length, n_features)")  # Clear message to debug malformed inputs
 
-        x = x.transpose(1, 2)  # Reordena a (batch, n_features, seq_length) para Conv1d de PyTorch
-        x = self.input_projection(x)  # Proyecta features de entrada al espacio de canales de la TCN
-        x = self.tcn_blocks(x)  # Procesa secuencia con bloques residuales causales multiescala
+        x = x.transpose(1, 2)  # Reorders to (batch, n_features, seq_length) for PyTorch Conv1d
+        x = self.input_projection(x)  # Projects input features into the TCN channel space
+        x = self.tcn_blocks(x)  # Processes sequence with multiscale causal residual blocks
 
-        last_state = x[:, :, -1]  # Conserva el ultimo timestep causal como resumen del estado mas reciente
-        cls_prob = self.classifier_head(last_state)  # Produce probabilidad de evento en el batch
-        reg_value = self.regressor_head(last_state)  # Produce magnitud continua de stormflow en el batch
-        return {"cls_prob": cls_prob, "reg_value": reg_value}  # Devuelve diccionario con ambas salidas para la loss
+        last_state = x[:, :, -1]  # Keeps the last causal timestep as a summary of the most recent state
+        cls_prob = self.classifier_head(last_state)  # Produces event probability for the batch
+        reg_value = self.regressor_head(last_state)  # Produces continuous stormflow magnitude for the batch
+        return {"cls_prob": cls_prob, "reg_value": reg_value}  # Returns dictionary with both outputs for the loss
 
     def predict(self, x: torch.Tensor, threshold: float = 0.5) -> torch.Tensor:
-        outputs = self.forward(x)  # Ejecuta forward para obtener probabilidad y magnitud
-        cls_prob = outputs["cls_prob"]  # Extrae probabilidad de evento para aplicar el switch duro
-        reg_value = outputs["reg_value"]  # Extrae magnitud predicha por el regresor
-        zeros = torch.zeros_like(reg_value)  # Crea tensor cero para casos sin evento
-        return torch.where(cls_prob >= threshold, reg_value, zeros)  # Aplica switch duro sin gating multiplicativo
+        outputs = self.forward(x)  # Runs forward to obtain probability and magnitude
+        cls_prob = outputs["cls_prob"]  # Extracts event probability to apply hard switch
+        reg_value = outputs["reg_value"]  # Extracts magnitude predicted by the regressor
+        zeros = torch.zeros_like(reg_value)  # Creates zero tensor for non-event cases
+        return torch.where(cls_prob >= threshold, reg_value, zeros)  # Applies hard switch without multiplicative gating
 
     def compute_receptive_field(self, print_result: bool = True) -> int:
-        receptive_field = 1  # Inicializa campo receptivo en 1 para el timestep actual
-        for dilation in self.dilations:  # Recorre cada bloque para acumular cobertura temporal total
-            receptive_field += 2 * (self.kernel_size - 1) * dilation  # Suma aporte de dos convoluciones por bloque
-        if print_result:  # Permite imprimir o solo devolver el valor segun necesidad del usuario
-            print(f"[tcn] Campo receptivo: {receptive_field} timesteps")  # Reporta campo receptivo total en pasos de tiempo
-        return receptive_field  # Devuelve cobertura temporal efectiva del modelo
+        receptive_field = 1  # Initializes receptive field at 1 for the current timestep
+        for dilation in self.dilations:  # Iterates through each block to accumulate total temporal coverage
+            receptive_field += 2 * (self.kernel_size - 1) * dilation  # Adds contribution of two convolutions per block
+        if print_result:  # Lets the caller print or only return the value as needed
+            print(f"[tcn] Receptive field: {receptive_field} timesteps")  # Reports total receptive field in timesteps
+        return receptive_field  # Returns effective temporal coverage of the model
 
     def count_parameters(self, print_result: bool = True) -> int:
-        trainable_params = sum(parameter.numel() for parameter in self.parameters() if parameter.requires_grad)  # Cuenta parametros entrenables para estimar complejidad
-        if print_result:  # Controla si se imprime diagnostico o solo se retorna el valor
-            print(f"[tcn] Parametros entrenables: {trainable_params:,}")  # Muestra total de parametros con separador para legibilidad
-        return trainable_params  # Retorna cantidad total de parametros entrenables
-
-
+        trainable_params = sum(parameter.numel() for parameter in self.parameters() if parameter.requires_grad)  # Counts trainable parameters to estimate complexity
+        if print_result:  # Controls whether to print a diagnostic or only return the value
+            print(f"[tcn] Trainable parameters: {trainable_params:,}")  # Shows total parameter count with separator for readability
+        return trainable_params  # Returns total number of trainable parameters

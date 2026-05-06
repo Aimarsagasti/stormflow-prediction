@@ -1,24 +1,24 @@
-"""TCN estandar (Bai et al. 2018) para iter19.
+"""Standard TCN (Bai et al. 2018) for iter19.
 
-Independiente de `src/models/tcn.py` (TwoStageTCN v1, deprecated).
-Implementa la arquitectura del paper original sin two-stage, sin clasificador,
-sin switch duro: bloques residuales con dos convoluciones causales dilatadas
-(WeightNorm + ReLU + Dropout cada una), skip 1x1 cuando los canales no
-coinciden, suma residual + ReLU.
+Independent from `src/models/tcn.py` (TwoStageTCN v1, deprecated).
+Implements the original paper architecture without two-stage, without a
+classifier, and without a hard switch: residual blocks with two dilated causal
+convolutions (WeightNorm + ReLU + Dropout each), 1x1 skip when channels do not
+match, residual sum + ReLU.
 
-Padding causal mediante Chomp1d: tras una conv1d con
-`padding=(kernel_size-1)*dilation`, se recortan los ultimos `padding` pasos.
-Esto preserva la longitud temporal y garantiza que la salida en el paso t solo
-depende de pasos <= t (sin leakage temporal).
+Causal padding through Chomp1d: after a conv1d with
+`padding=(kernel_size-1)*dilation`, the last `padding` steps are trimmed.
+This preserves temporal length and guarantees that output at step t depends
+only on steps <= t (no temporal leakage).
 
-Receptive field con kernel_size=3 y dilations=[1,2,4,8]:
+Receptive field with kernel_size=3 and dilations=[1,2,4,8]:
     RF = 1 + 2 * (kernel_size - 1) * sum(dilations)
        = 1 + 2 * 2 * (1+2+4+8)
        = 1 + 4 * 15
-       = 61 pasos
-con T=72 pasos disponibles, la ultima posicion ve 61 pasos de contexto efectivo.
+       = 61 steps
+with T=72 available steps, the last position sees 61 steps of effective context.
 
-Forward: x (B, T, F) -> permuta a (B, F, T) -> bloques -> ultima posicion ->
+Forward: x (B, T, F) -> permute to (B, F, T) -> blocks -> last position ->
 Linear(C, 1) -> y_hat (B,).
 """
 
@@ -32,10 +32,10 @@ from torch.nn.utils import weight_norm
 
 
 class Chomp1d(nn.Module):
-    """Recorta los ultimos `chomp_size` pasos de la dimension temporal.
+    """Trim the last `chomp_size` steps from the temporal dimension.
 
-    Truco estandar de Bai 2018 para conseguir convolucion causal a partir
-    de una conv1d con padding simetrico en `(kernel_size-1)*dilation`.
+    Standard Bai 2018 trick to obtain causal convolution from a conv1d
+    with symmetric padding of `(kernel_size-1)*dilation`.
     """
 
     def __init__(self, chomp_size: int) -> None:
@@ -49,14 +49,14 @@ class Chomp1d(nn.Module):
 
 
 class TemporalBlock(nn.Module):
-    """Bloque residual de Bai 2018: dos conv causales dilatadas + skip.
+    """Bai 2018 residual block: two dilated causal convs + skip.
 
     Args:
-        in_channels: canales de entrada (F en el primer bloque, hidden despues).
-        out_channels: canales de salida (hidden_channels en todos los bloques).
-        kernel_size: tamano del kernel temporal (3 en la spec).
-        dilation: dilatacion de este bloque (1, 2, 4, 8 en la spec).
-        dropout: probabilidad de dropout aplicada tras cada ReLU.
+        in_channels: input channels (F in the first block, hidden after that).
+        out_channels: output channels (hidden_channels in all blocks).
+        kernel_size: temporal kernel size (3 in the spec).
+        dilation: dilation of this block (1, 2, 4, 8 in the spec).
+        dropout: dropout probability applied after each ReLU.
     """
 
     def __init__(
@@ -96,7 +96,7 @@ class TemporalBlock(nn.Module):
         self.relu2 = nn.ReLU()
         self.dropout2 = nn.Dropout(dropout)
 
-        # Skip: 1x1 conv si los canales cambian, identidad si no.
+        # Skip: 1x1 conv if channels change, identity otherwise.
         self.downsample: Optional[nn.Conv1d] = (
             nn.Conv1d(in_channels, out_channels, kernel_size=1)
             if in_channels != out_channels
@@ -127,23 +127,23 @@ class TemporalBlock(nn.Module):
 
 
 class TCNClean(nn.Module):
-    """TCN estandar Bai 2018 para regresion escalar a un horizonte.
+    """Standard Bai 2018 TCN for scalar regression at one horizon.
 
     Args:
-        in_channels: F (numero de canales de entrada). Para iter19 = 11.
-        hidden_channels: C (canales internos comunes a todos los bloques).
-            La spec usa 32 (baseline) o 64 (variante A3).
-        kernel_size: tamano del kernel temporal. La spec fija 3.
-        num_blocks: numero de bloques residuales. La spec fija 4.
-        dilations: secuencia de dilataciones por bloque. Si None, usa
-            [2**i for i in range(num_blocks)] = [1, 2, 4, 8] para 4 bloques.
-        dropout: probabilidad de dropout. La spec fija 0.1.
+        in_channels: F (number of input channels). For iter19 = 11.
+        hidden_channels: C (internal channels shared by all blocks).
+            The spec uses 32 (baseline) or 64 (A3 variant).
+        kernel_size: temporal kernel size. The spec fixes it at 3.
+        num_blocks: number of residual blocks. The spec fixes it at 4.
+        dilations: sequence of per-block dilations. If None, uses
+            [2**i for i in range(num_blocks)] = [1, 2, 4, 8] for 4 blocks.
+        dropout: dropout probability. The spec fixes it at 0.1.
 
-    Forward esperado:
-        x: tensor (B, T, F) con secuencia normalizada.
-        Permuta a (B, F, T), pasa por los bloques (que preservan T),
-        toma la ultima posicion temporal y aplica una capa lineal C -> 1.
-        Devuelve y_hat (B,) en espacio normalizado del target.
+    Expected forward:
+        x: tensor (B, T, F) with normalized sequence.
+        Permutes to (B, F, T), passes through the blocks (which preserve T),
+        takes the last temporal position, and applies a linear layer C -> 1.
+        Returns y_hat (B,) in normalized target space.
     """
 
     def __init__(
@@ -162,7 +162,7 @@ class TCNClean(nn.Module):
             dilations = list(dilations)
         if len(dilations) != num_blocks:
             raise ValueError(
-                f"len(dilations)={len(dilations)} no coincide con num_blocks={num_blocks}"
+                f"len(dilations)={len(dilations)} does not match num_blocks={num_blocks}"
             )
 
         layers = []
@@ -184,7 +184,7 @@ class TCNClean(nn.Module):
         nn.init.kaiming_normal_(self.linear.weight, nonlinearity="linear")
         nn.init.zeros_(self.linear.bias)
 
-        # Metadata interna util para logging / serializacion del experimento.
+        # Internal metadata useful for logging / experiment serialization.
         self.config = {
             "in_channels": int(in_channels),
             "hidden_channels": int(hidden_channels),
@@ -199,7 +199,7 @@ class TCNClean(nn.Module):
         # x: (B, T, F) -> (B, F, T)
         x = x.permute(0, 2, 1).contiguous()
         out = self.blocks(x)              # (B, C, T)
-        out = out[:, :, -1]                # (B, C) ultima posicion temporal
+        out = out[:, :, -1]                # (B, C) last temporal position
         y = self.linear(out).squeeze(-1)   # (B,)
         return y
 

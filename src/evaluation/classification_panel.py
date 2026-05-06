@@ -1,11 +1,11 @@
-"""Panel de evaluacion para clasificadores binarios de alerta en iter18.
+"""Evaluation panel for binary alert classifiers in iter18.
 
-El panel esta pensado para responder la pregunta operativa del MSD:
-"si el modelo emite una alerta, con que recall, precision y anticipacion
-real lo hace?".
+The panel is designed to answer the MSD operational question:
+"if the model raises an alert, with what recall, precision, and real lead time
+does it do so?"
 
-La salida es JSON-serializable para poder persistir resultados completos,
-graficarlos despues y compararlos entre variantes.
+The output is JSON-serializable so complete results can be persisted,
+plotted later, and compared across variants.
 """
 
 from __future__ import annotations
@@ -26,22 +26,22 @@ from sklearn.metrics import (
 )
 
 
-# Definicion fija del gap operativo entre eventos positivos independientes.
+# Fixed definition of the operational gap between independent positive events.
 DEFAULT_EVENT_GAP_MINUTES = 240.0
 
 
 def _to_numpy_int(y_true_bin: Union[np.ndarray, Sequence[int]]) -> np.ndarray:
-    """Normaliza el target binario a `int32` para metrica y serializacion."""
+    """Normalize binary target to `int32` for metrics and serialization."""
     return np.asarray(y_true_bin, dtype=np.int32).reshape(-1)
 
 
 def _to_numpy_float(y_prob: Union[np.ndarray, Sequence[float]]) -> np.ndarray:
-    """Normaliza las probabilidades a `float64` para calculos estables."""
+    """Normalize probabilities to `float64` for stable computations."""
     return np.asarray(y_prob, dtype=float).reshape(-1)
 
 
 def _safe_metric(metric_fn, *args: Any) -> float:
-    """Ejecuta una metrica y devuelve NaN si la definicion no aplica."""
+    """Run a metric and return NaN if the definition does not apply."""
     try:
         return float(metric_fn(*args))
     except ValueError:
@@ -49,7 +49,7 @@ def _safe_metric(metric_fn, *args: Any) -> float:
 
 
 def _class_distribution(y_true_bin: np.ndarray) -> Dict[str, float]:
-    """Resume el balance de clases para interpretar el resto del panel."""
+    """Summarize class balance to interpret the rest of the panel."""
     n_total = int(y_true_bin.size)
     n_positives = int(np.sum(y_true_bin == 1))
     n_negatives = int(np.sum(y_true_bin == 0))
@@ -67,18 +67,18 @@ def _metrics_at_threshold(
     y_prob: np.ndarray,
     threshold: float,
 ) -> Dict[str, float]:
-    """Calcula metricas de clasificacion y matriz de confusion a un umbral."""
-    # Binarizamos usando `>=` para mantener consistencia con el notebook.
+    """Compute classification metrics and confusion matrix at one threshold."""
+    # Binarize with `>=` to keep consistency with the notebook.
     y_pred_bin = (y_prob >= float(threshold)).astype(np.int32, copy=False)
-    # Contamos las cuatro celdas de la confusion matrix manualmente para que
-    # el JSON no dependa de otra API externa.
+    # Count the four confusion-matrix cells manually so the JSON does not
+    # depend on another external API.
     tp = int(np.sum((y_true_bin == 1) & (y_pred_bin == 1)))
     fp = int(np.sum((y_true_bin == 0) & (y_pred_bin == 1)))
     tn = int(np.sum((y_true_bin == 0) & (y_pred_bin == 0)))
     fn = int(np.sum((y_true_bin == 1) & (y_pred_bin == 0)))
     return {
         "threshold": float(threshold),
-        # `zero_division=0` evita warnings cuando no hay positivos predichos.
+        # `zero_division=0` avoids warnings when there are no predicted positives.
         "precision": float(precision_score(y_true_bin, y_pred_bin, zero_division=0)),
         "recall": float(recall_score(y_true_bin, y_pred_bin, zero_division=0)),
         "f1": float(f1_score(y_true_bin, y_pred_bin, zero_division=0)),
@@ -95,12 +95,12 @@ def _extract_positive_events(
     timestamps: Optional[pd.DatetimeIndex],
     gap_minutes: float = DEFAULT_EVENT_GAP_MINUTES,
 ) -> list[Dict[str, int]]:
-    """Segmenta intervalos positivos usando continuidad + gap temporal minimo."""
+    """Segment positive intervals using continuity + minimum temporal gap."""
     positive_idx = np.where(y_true_bin == 1)[0]
     if positive_idx.size == 0:
         return []
 
-    # Si no hay timestamps, solo podemos separar por continuidad de indices.
+    # If there are no timestamps, we can only separate by index continuity.
     if timestamps is None:
         events: list[Dict[str, int]] = []
         start = int(positive_idx[0])
@@ -113,7 +113,7 @@ def _extract_positive_events(
         events.append({"start": start, "end": previous})
         return events
 
-    # Convertimos a nanosegundos para comparar gaps sin perder precision.
+    # Convert to nanoseconds so gaps can be compared without losing precision.
     ts_ns = timestamps.to_numpy().astype("datetime64[ns]").astype("int64")
     gap_ns = int(gap_minutes * 60.0 * 1_000_000_000)
     events = []
@@ -121,7 +121,7 @@ def _extract_positive_events(
     previous = int(positive_idx[0])
     for current_raw in positive_idx[1:]:
         current = int(current_raw)
-        # Cortamos evento si hay salto de indices o si el tiempo supera el gap.
+        # Split event if there is an index jump or time exceeds the gap.
         if current != previous + 1 or (ts_ns[current] - ts_ns[previous]) > gap_ns:
             events.append({"start": start, "end": previous})
             start = current
@@ -133,12 +133,12 @@ def _extract_positive_events(
 def _resolve_raw_block(
     y_true_raw: Optional[Union[np.ndarray, Sequence[float], Dict[str, Any]]],
 ) -> tuple[Optional[np.ndarray], Optional[float]]:
-    """Extrae serie cruda y umbral MGD desde un bloque flexible.
+    """Extract raw series and MGD threshold from a flexible block.
 
-    Para conservar la firma publica pedida, `y_true_raw` puede ser:
+    To preserve the requested public signature, `y_true_raw` can be:
     - `None`
-    - array/sequence con la serie cruda
-    - dict con claves `values` y `threshold_mgd`
+    - array/sequence with the raw series
+    - dict with keys `values` and `threshold_mgd`
     """
     if y_true_raw is None:
         return None, None
@@ -157,7 +157,7 @@ def _lead_time_block(
     threshold_operational: Optional[float],
     gap_minutes: float = DEFAULT_EVENT_GAP_MINUTES,
 ) -> Dict[str, Any]:
-    """Calcula lead time por evento positivo si hay datos suficientes."""
+    """Compute lead time per positive event if enough data is available."""
     raw_values, threshold_mgd = _resolve_raw_block(y_true_raw)
     if (
         timestamps is None
@@ -180,7 +180,7 @@ def _lead_time_block(
             "per_event": [],
         }
 
-    # Extraemos eventos positivos de la etiqueta binaria ya alineada en t.
+    # Extract positive events from the binary label already aligned at t.
     events = _extract_positive_events(y_true_bin, timestamps, gap_minutes=gap_minutes)
     ts_ns = timestamps.to_numpy().astype("datetime64[ns]").astype("int64")
     per_event: list[Dict[str, Any]] = []
@@ -190,14 +190,14 @@ def _lead_time_block(
         end = int(event["end"])
         event_slice = slice(start, end + 1)
 
-        # Buscamos el primer instante en que el modelo supera el umbral operativo.
+        # Look for the first instant where the model exceeds the operational threshold.
         alert_rel_idx = np.where(y_prob[event_slice] >= float(threshold_operational))[0]
-        # Buscamos el primer instante en que el stormflow real actual supera U.
+        # Look for the first instant where actual current stormflow exceeds U.
         exceed_rel_idx = np.where(raw_values[event_slice] >= float(threshold_mgd))[0]
 
         if exceed_rel_idx.size == 0:
-            # Si esto ocurre, el evento positivo no contiene el rebasamiento real
-            # esperado y conviene dejarlo documentado para diagnostico.
+            # If this happens, the positive event does not contain the expected
+            # real exceedance and it is worth documenting for diagnostics.
             per_event.append(
                 {
                     "event_id": event_id,
@@ -226,7 +226,7 @@ def _lead_time_block(
             continue
 
         alert_idx = start + int(alert_rel_idx[0])
-        # Lead time positivo significa alerta antes del rebasamiento.
+        # Positive lead time means alert before exceedance.
         lead_time_minutes = float((ts_ns[exceed_idx] - ts_ns[alert_idx]) / (60.0 * 1_000_000_000))
         per_event.append(
             {
@@ -241,7 +241,7 @@ def _lead_time_block(
             }
         )
 
-    # Resumimos solo eventos que efectivamente generaron alerta y excedencia real.
+    # Summarize only events that actually generated an alert and a real exceedance.
     detected_times = [
         float(row["lead_time_minutes"])
         for row in per_event
@@ -281,13 +281,13 @@ def _sample_pr_curve(
     y_prob: np.ndarray,
     n_points: int = 20,
 ) -> list[Dict[str, float]]:
-    """Muestrea la curva precision-recall para graficarla sin inflar el JSON."""
+    """Sample the precision-recall curve so the JSON does not become bloated."""
     precision, recall, thresholds = precision_recall_curve(y_true_bin, y_prob)
     if thresholds.size == 0:
         return []
 
-    # `precision_recall_curve` devuelve una observacion extra sin umbral; por
-    # eso alineamos precision/recall con `thresholds` descartando el ultimo punto.
+    # `precision_recall_curve` returns one extra observation without threshold;
+    # therefore align precision/recall with `thresholds` by discarding the last point.
     precision = precision[:-1]
     recall = recall[:-1]
     sample_count = min(int(n_points), int(thresholds.size))
@@ -309,11 +309,11 @@ def _calibration_deciles(
     y_prob: np.ndarray,
     n_bins: int = 10,
 ) -> list[Dict[str, float]]:
-    """Construye una tabla de calibracion por cuantiles de probabilidad."""
+    """Build a calibration table by probability quantiles."""
     frame = pd.DataFrame({"y_true": y_true_bin, "y_prob": y_prob})
     try:
-        # `qcut` reparte por masa de probabilidad y refleja mejor calibracion
-        # cuando el desbalance es severo.
+        # `qcut` splits by probability mass and better reflects calibration
+        # when imbalance is severe.
         bins = pd.qcut(frame["y_prob"], q=n_bins, duplicates="drop")
     except ValueError:
         bins = pd.Series(["all"] * len(frame))
@@ -342,23 +342,23 @@ def evaluate_classification_panel(
     threshold_default: float = 0.5,
     threshold_operational: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """Evalua un clasificador binario y devuelve un panel JSON-serializable."""
+    """Evaluate a binary classifier and return a JSON-serializable panel."""
     y_true_bin_arr = _to_numpy_int(y_true_bin)
     y_prob_arr = _to_numpy_float(y_prob)
     if y_true_bin_arr.shape[0] != y_prob_arr.shape[0]:
-        raise ValueError("`y_true_bin` y `y_prob` deben tener la misma longitud.")
+        raise ValueError("`y_true_bin` and `y_prob` must have the same length.")
 
-    # Normalizamos timestamps a `DatetimeIndex` para operar siempre igual.
+    # Normalize timestamps to `DatetimeIndex` so operation is always consistent.
     ts_index: Optional[pd.DatetimeIndex]
     if timestamps is None:
         ts_index = None
     else:
         ts_index = pd.to_datetime(pd.Index(timestamps))
         if len(ts_index) != len(y_true_bin_arr):
-            raise ValueError("`timestamps` debe tener la misma longitud que `y_true_bin`.")
+            raise ValueError("`timestamps` must have the same length as `y_true_bin`.")
 
-    # Si no se especifica umbral operativo, reutilizamos el default para que
-    # el panel siga siendo consistente y no deje campos vacios.
+    # If no operational threshold is specified, reuse the default so the
+    # panel stays consistent and does not leave empty fields.
     op_threshold = float(threshold_default if threshold_operational is None else threshold_operational)
 
     distribution = _class_distribution(y_true_bin_arr)

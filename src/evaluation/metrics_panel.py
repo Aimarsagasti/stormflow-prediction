@@ -1,22 +1,21 @@
-"""Panel de metricas multi-bucket para evaluar modelos de stormflow.
+"""Multi-bucket metrics panel to evaluate stormflow models.
 
-Reemplaza funcionalmente `src/evaluation/metrics.py::evaluate_model` con una
-bateria mas completa (bias/peak por bucket, peak_lag_minutes, recall@U y
-cobertura de cuantiles). Trabaja sobre arrays en MGD reales; la
-denormalizacion queda fuera del panel porque los modelos nuevos (iter17+)
-trabajan en MGD directamente.
+Functionally replaces `src/evaluation/metrics.py::evaluate_model` with a more
+complete battery (bias/peak by bucket, peak_lag_minutes, recall@U, and
+quantile coverage). It works on arrays in real MGD; denormalization stays
+outside the panel because newer models (iter17+) work directly in MGD.
 
-Buckets de severidad (mismos que `evaluate_local.py`):
+Severity buckets (same as `evaluate_local.py`):
     Base     <0.5
     Leve     [0.5, 5)
     Moderado [5, 20)
     Alto     [20, 50)
     Extremo  >=50
 
-`evaluate_local.py` mantiene dos umbrales (Alto [20, 50) y Extremo [50, inf))
-que difieren de la variante historica en `src/evaluation/metrics.py`
-(`grande [12.8, 51)`, `extremo [51, inf)`). El panel usa los umbrales
-de `evaluate_local.py` porque son los que el diagnostico (S2-S5) emplea.
+`evaluate_local.py` keeps two thresholds (Alto [20, 50) and Extremo [50, inf))
+that differ from the historical variant in `src/evaluation/metrics.py`
+(`grande [12.8, 51)`, `extremo [51, inf)`). The panel uses the thresholds from
+`evaluate_local.py` because those are the ones used by diagnostics S2-S5.
 """
 
 from __future__ import annotations
@@ -28,7 +27,7 @@ import pandas as pd
 
 
 # ---------------------------------------------------------------------------
-# Configuracion por defecto
+# Default configuration
 # ---------------------------------------------------------------------------
 
 DEFAULT_BUCKETS: List[Tuple[str, float, float]] = [
@@ -41,14 +40,14 @@ DEFAULT_BUCKETS: List[Tuple[str, float, float]] = [
 
 DEFAULT_RECALL_THRESHOLDS: List[float] = [25.0, 50.0]
 
-# Los datos son a 5 min. `event_gap_minutes=240` = 4h entre muestras con
-# y_true > event_threshold para separar un evento fisico del siguiente.
+# Data are at 5 min. `event_gap_minutes=240` = 4h between samples with
+# y_true > event_threshold to separate one physical event from the next.
 DEFAULT_EVENT_GAP_MINUTES = 240.0
 DEFAULT_EVENT_THRESHOLD_MGD = 0.5
 
 
 # ---------------------------------------------------------------------------
-# Metricas basicas
+# Basic metrics
 # ---------------------------------------------------------------------------
 
 def _nse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -73,7 +72,7 @@ def _mae(y_true: np.ndarray, y_pred: np.ndarray) -> float:
 
 
 def _peak_err_pct(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-    """Error pico = (max(y_pred) - max(y_true)) / max(y_true) * 100."""
+    """Peak error = (max(y_pred) - max(y_true)) / max(y_true) * 100."""
     if y_true.size == 0:
         return float("nan")
     pt = float(np.max(y_true))
@@ -120,7 +119,7 @@ def _bucket_metrics(
 
 
 # ---------------------------------------------------------------------------
-# Definicion de evento fisico y peak_lag_minutes
+# Physical event definition and peak_lag_minutes
 # ---------------------------------------------------------------------------
 
 def _extract_events(
@@ -129,26 +128,25 @@ def _extract_events(
     event_threshold: float,
     gap_minutes: float,
 ) -> List[Dict[str, int]]:
-    """Segmenta el test en eventos fisicos.
+    """Segment test into physical events.
 
-    Definicion (docstring oficial del panel): un evento es un intervalo
-    continuo de muestras con `y_true > event_threshold` separado del
-    siguiente por mas de `gap_minutes` sin muestras sobre el umbral.
-    Implementacion: se detectan muestras sobre umbral y cualquier hueco
-    temporal > gap_minutes corta el evento.
+    Definition (official panel docstring): an event is a continuous interval
+    of samples with `y_true > event_threshold`, separated from the next event
+    by more than `gap_minutes` without samples above threshold.
+    Implementation: samples above threshold are detected and any temporal gap
+    > gap_minutes splits the event.
 
-    Si en el repo existiera una convencion distinta (p. ej. `is_event` del
-    MSD), se deberia usar esa; aqui no hay acceso a `is_event` desde el panel,
-    por lo que el umbral + gap es la definicion autonoma.
+    If the repo had a different convention (for example MSD `is_event`), that
+    should be used; here the panel has no access to `is_event`, so threshold +
+    gap is the autonomous definition.
 
-    Devuelve lista de eventos con start, end (indices inclusivos).
+    Returns a list of events with start and end (inclusive indices).
     """
     if timestamps is None:
-        # Si no hay timestamps no se puede partir por gap -> evento unico continuo
+        # Without timestamps, only mask breaks can be used to split events.
         mask = y_true > event_threshold
         if not mask.any():
             return []
-        # Solo cortar por rupturas en la mascara
         events: List[Dict[str, int]] = []
         in_event = False
         start = 0
@@ -180,9 +178,9 @@ def _extract_events(
             start = i
             prev_idx = i
             continue
-        # i es muestra activa y prev_idx es la ultima activa previa
+        # i is an active sample and prev_idx is the last previous active sample.
         if ts_ns[i] - ts_ns[prev_idx] > gap_ns:  # type: ignore[arg-type]
-            # cerrar evento actual
+            # Close current event.
             events.append({"start": int(start), "end": int(prev_idx)})  # type: ignore[arg-type]
             start = i
         prev_idx = i
@@ -197,7 +195,7 @@ def _peak_lag_minutes_per_event(
     timestamps: pd.DatetimeIndex,
     events: List[Dict[str, int]],
 ) -> List[Dict[str, float]]:
-    """Para cada evento, tiempo entre pico real y pico predicho (pred - real)."""
+    """For each event, time between real peak and predicted peak (pred - real)."""
     if timestamps is None:
         return []
     ts_ns = timestamps.to_numpy().astype("datetime64[ns]").astype("int64")
@@ -245,7 +243,7 @@ def _summarize_peak_lag(event_rows: List[Dict[str, float]]) -> Dict[str, float]:
 
 
 # ---------------------------------------------------------------------------
-# Recall por umbral
+# Recall by threshold
 # ---------------------------------------------------------------------------
 
 def _recall_at_threshold(
@@ -254,8 +252,8 @@ def _recall_at_threshold(
     events: List[Dict[str, int]],
     threshold: float,
 ) -> Dict[str, float]:
-    """recall@U = fraccion de eventos con max(y_true) >= U correctamente alertados
-    (max(y_pred) >= U en el mismo evento)."""
+    """recall@U = fraction of events with max(y_true) >= U correctly alerted
+    (max(y_pred) >= U in the same event)."""
     pos = 0
     tp = 0
     fn_peak_values: List[float] = []
@@ -283,7 +281,7 @@ def _recall_at_threshold(
 
 
 # ---------------------------------------------------------------------------
-# Cobertura de cuantiles
+# Quantile coverage
 # ---------------------------------------------------------------------------
 
 def _quantile_coverage(
@@ -292,14 +290,14 @@ def _quantile_coverage(
 ) -> Dict[str, Dict[str, float]]:
     """`quantiles` = dict `{'0.90': (y_lo, y_hi), '0.95': (y_lo, y_hi)}`.
 
-    Devuelve cobertura empirica (% de muestras dentro del intervalo).
+    Returns empirical coverage (% of samples inside the interval).
     """
     out: Dict[str, Dict[str, float]] = {}
     for label, (lo, hi) in quantiles.items():
         lo = np.asarray(lo, dtype=float).reshape(-1)
         hi = np.asarray(hi, dtype=float).reshape(-1)
         if lo.size != y_true.size or hi.size != y_true.size:
-            raise ValueError(f"quantiles[{label}] longitud mismatch con y_true")
+            raise ValueError(f"quantiles[{label}] length mismatch with y_true")
         inside = (y_true >= lo) & (y_true <= hi)
         out[label] = {
             "coverage_empirical": float(np.mean(inside)),
@@ -309,7 +307,7 @@ def _quantile_coverage(
 
 
 # ---------------------------------------------------------------------------
-# Entrada publica
+# Public entry point
 # ---------------------------------------------------------------------------
 
 def evaluate_full_panel(
@@ -323,31 +321,31 @@ def evaluate_full_panel(
     quantiles: Optional[Dict[str, Tuple[np.ndarray, np.ndarray]]] = None,
     clip_nonnegative: bool = True,
 ) -> Dict:
-    """Panel completo de metricas.
+    """Full metrics panel.
 
-    Parametros:
-      y_true, y_pred: arrays 1D en MGD (misma longitud).
-      timestamps: opcional, para calcular peak_lag_minutes y segmentar eventos
-          por gap. Si None, los eventos se segmentan solo por mascara y los
-          lags quedan en nan/missing.
-      buckets: lista de tuplas (nombre, lo, hi). Por defecto DEFAULT_BUCKETS
-          (los de `evaluate_local.py`).
-      recall_thresholds: umbrales U para `recall@U`. Por defecto [25, 50].
-      event_threshold: umbral (MGD) para considerar una muestra activa.
-      event_gap_minutes: gap temporal minimo para separar eventos. 4h por
-          defecto (suficiente para separar tormentas tipicas en MC-CL-005).
-      quantiles: dict opcional `{'0.90': (lo, hi), '0.95': (lo, hi)}`.
-      clip_nonnegative: si True, fuerza predicciones y target a ser >=0 (igual
-          que `evaluate_local.py`). Util para modelos que no garantizan
-          positividad.
+    Parameters:
+      y_true, y_pred: 1D arrays in MGD (same length).
+      timestamps: optional, used to compute peak_lag_minutes and segment events
+          by gap. If None, events are segmented only by mask and lags stay
+          as nan/missing.
+      buckets: list of tuples (name, lo, hi). By default DEFAULT_BUCKETS
+          (those from `evaluate_local.py`).
+      recall_thresholds: thresholds U for `recall@U`. Default [25, 50].
+      event_threshold: threshold (MGD) to consider a sample active.
+      event_gap_minutes: minimum temporal gap to separate events. Default 4h
+          (enough to separate typical storms in MC-CL-005).
+      quantiles: optional dict `{'0.90': (lo, hi), '0.95': (lo, hi)}`.
+      clip_nonnegative: if True, forces predictions and target to be >=0 (same
+          as `evaluate_local.py`). Useful for models that do not guarantee
+          positivity.
 
-    Devuelve dict JSON-serializable. Campo `quantile_coverage` ausente si
-    `quantiles` es None.
+    Returns JSON-serializable dict. Field `quantile_coverage` is absent if
+    `quantiles` is None.
     """
     y_true = np.asarray(y_true, dtype=float).reshape(-1)
     y_pred = np.asarray(y_pred, dtype=float).reshape(-1)
     if y_true.shape != y_pred.shape:
-        raise ValueError("y_true y y_pred deben tener la misma longitud")
+        raise ValueError("y_true and y_pred must have the same length")
 
     if clip_nonnegative:
         y_true = np.clip(y_true, 0.0, None)
@@ -357,7 +355,7 @@ def evaluate_full_panel(
     if timestamps is not None:
         ts = pd.DatetimeIndex(pd.to_datetime(timestamps))
         if ts.size != y_true.size:
-            raise ValueError("timestamps debe tener la misma longitud que y_true")
+            raise ValueError("timestamps must have the same length as y_true")
 
     if buckets is None:
         buckets = DEFAULT_BUCKETS
@@ -373,10 +371,10 @@ def evaluate_full_panel(
         "peak_err_pct": _peak_err_pct(y_true, y_pred),
     }
 
-    # Por bucket
+    # By bucket
     bucket_block = _bucket_metrics(y_true, y_pred, buckets)
 
-    # Eventos + peak_lag
+    # Events + peak_lag
     events = _extract_events(y_true, ts, event_threshold, event_gap_minutes)
     event_rows = _peak_lag_minutes_per_event(y_true, y_pred, ts, events) if ts is not None else []
     peak_lag_summary = _summarize_peak_lag(event_rows)

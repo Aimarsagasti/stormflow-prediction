@@ -1,15 +1,15 @@
-"""XGBoost baseline con lags explicitos del target para iter17.
+"""XGBoost baseline with explicit target lags for iter17.
 
-Modelo principal del sistema nuevo tras el diagnostico (ver
-`outputs/diagnostic/DIAGNOSTIC_REPORT.md`): XGBoost regresivo entrenado
-sobre los 12 lags del target (`stormflow_mgd[t-0..t-11]`) mas 10 features
-exogenas reducidas derivadas de S5. Horizonte h >= 1.
+Main model of the new system after the diagnostic (see
+`outputs/diagnostic/DIAGNOSTIC_REPORT.md`): regressive XGBoost trained
+on the 12 target lags (`stormflow_mgd[t-0..t-11]`) plus 10 reduced exogenous
+features derived from S5. Horizon h >= 1.
 
-El modulo es independiente del pipeline de normalizacion del TCN:
-- Trabaja con valores en MGD reales (sin log1p, sin z-score).
-- No usa `src/pipeline/normalize.py` ni `src/models/loss.py`.
-- El split y los indices alineados son identicos a
-  `scripts/diagnostic/s2_baselines.py` para que las cifras comparen directo.
+This module is independent from the TCN normalization pipeline:
+- It works with real MGD values (no log1p, no z-score).
+- It does not use `src/pipeline/normalize.py` or `src/models/loss.py`.
+- The split and aligned indices are identical to
+  `scripts/diagnostic/s2_baselines.py` so the figures compare directly.
 """
 
 from __future__ import annotations
@@ -23,8 +23,8 @@ from xgboost import XGBRegressor
 
 
 # ---------------------------------------------------------------------------
-# Constantes del split y features - clonadas de scripts/diagnostic/s2_baselines.py
-# para evitar introducir una dependencia de scripts/ desde src/.
+# Split and feature constants - cloned from scripts/diagnostic/s2_baselines.py
+# to avoid introducing a dependency on scripts/ from src/.
 # ---------------------------------------------------------------------------
 
 IDX_TRAIN_END = 771374
@@ -32,10 +32,10 @@ IDX_VAL_END = 936669
 SEQ_LENGTH = 72
 TARGET_COL = "stormflow_mgd"
 
-# Subconjunto reducido de features tras S5 (orden por permutation importance).
-# Justificacion: S5 demostro que estas 10 features capturan toda la senal
-# exogena util (PI > 0), y que las otras 10 del set original son ruido o
-# redundancia. Mantener el orden del reporte para trazabilidad.
+# Reduced feature subset after S5 (ordered by permutation importance).
+# Justification: S5 showed that these 10 features capture all useful
+# exogenous signal (PI > 0), and that the other 10 in the original set are
+# noise or redundancy. Keep report order for traceability.
 FEATURES_10: List[str] = [
     "api_dynamic",
     "rain_sum_360m",
@@ -49,9 +49,9 @@ FEATURES_10: List[str] = [
     "rain_sum_30m",
 ]
 
-# Punto de partida de hiperparametros del reporte (§7.2). early_stopping_rounds=20
-# se pasa via fit() en XGBoost >= 1.6 usando callbacks; aqui se guarda como clave
-# separada y la funcion de entrenamiento la aplica a traves de eval_set.
+# Hyperparameter starting point from the report (§7.2). early_stopping_rounds=20
+# is passed via fit() in XGBoost >= 1.6 using callbacks; here it is stored as a
+# separate key and the training function applies it through eval_set.
 DEFAULT_XGB_PARAMS: Dict = dict(
     n_estimators=500,
     max_depth=6,
@@ -66,7 +66,7 @@ DEFAULT_EARLY_STOPPING_ROUNDS = 20
 
 
 # ---------------------------------------------------------------------------
-# Split cronologico e indices alineados (identicos a S2)
+# Chronological split and aligned indices (identical to S2)
 # ---------------------------------------------------------------------------
 
 def aligned_indices(
@@ -76,15 +76,15 @@ def aligned_indices(
     total_len: int,
     seq_length: int = SEQ_LENGTH,
 ) -> np.ndarray:
-    """Indices absolutos t validos para un split.
+    """Valid absolute t indices for a split.
 
-    Reglas:
-    - existe ventana previa completa de `seq_length` pasos (t >= split_start + seq_length)
-    - el origen t cae dentro de [split_start, split_end)
-    - existe y(t+h) dentro del dataframe (t + h <= total_len - 1)
+    Rules:
+    - a full previous window of `seq_length` steps exists (t >= split_start + seq_length)
+    - origin t falls inside [split_start, split_end)
+    - y(t+h) exists inside the dataframe (t + h <= total_len - 1)
 
-    Replica la convencion de S2/TCN: el target puede caer en la frontera con
-    el siguiente split mientras exista en el dataframe completo.
+    Replicates the S2/TCN convention: the target may fall on the boundary with
+    the next split as long as it exists in the full dataframe.
     """
     first = split_start + seq_length
     last_in_split = split_end - 1
@@ -100,7 +100,7 @@ def get_split_indices(
     horizon: int,
     seq_length: int = SEQ_LENGTH,
 ) -> Dict[str, np.ndarray]:
-    """Devuelve (idx_train, idx_val, idx_test) alineados al split oficial."""
+    """Return (idx_train, idx_val, idx_test) aligned to the official split."""
     total = len(df)
     return {
         "train": aligned_indices(0, IDX_TRAIN_END, horizon, total, seq_length),
@@ -110,14 +110,14 @@ def get_split_indices(
 
 
 # ---------------------------------------------------------------------------
-# Construccion de features con lags del target
+# Feature construction with target lags
 # ---------------------------------------------------------------------------
 
 def _lag_matrix(series: np.ndarray, lags: int) -> np.ndarray:
-    """Matriz (n, lags) con columnas [y(t), y(t-1), ..., y(t-lags+1)].
+    """Matrix (n, lags) with columns [y(t), y(t-1), ..., y(t-lags+1)].
 
-    Las primeras `lags-1` filas quedan NaN y deben filtrarse por el caller.
-    Equivalente a la funcion lag_matrix de s2_baselines.py.
+    The first `lags-1` rows remain NaN and must be filtered by the caller.
+    Equivalent to the lag_matrix function from s2_baselines.py.
     """
     n = len(series)
     out = np.full((n, lags), np.nan, dtype=float)
@@ -135,23 +135,24 @@ def build_features_with_lags(
     include_lags: bool = True,
     include_features: bool = True,
 ) -> Tuple[np.ndarray, np.ndarray, List[str]]:
-    """Construye (X, y, feature_names) para un conjunto de indices.
+    """Build (X, y, feature_names) for one index set.
 
-    X contiene, en este orden:
-    - Si include_lags: `y(t), y(t-1), ..., y(t-lags+1)` (lags columnas)
-    - Si include_features: columnas de `features` evaluadas en t
+    X contains, in this order:
+    - If include_lags: `y(t), y(t-1), ..., y(t-lags+1)` (lags columns)
+    - If include_features: columns of `features` evaluated at t
 
-    y es `stormflow_mgd(t + horizon)`.
+    y is `stormflow_mgd(t + horizon)`.
 
-    Nota: el caller garantiza que los indices en `idx` estan alineados (todos
-    tienen ventana previa suficiente y target valido), por construccion de
-    `aligned_indices`. No hay filas con NaN ya que SEQ_LENGTH (72) > lags (12)
-    por defecto, pero la funcion lo valida por robustez.
+    Note: the caller guarantees that indices in `idx` are aligned (all
+    have enough previous window and a valid target), by construction of
+    `aligned_indices`. There should be no rows with NaN because
+    SEQ_LENGTH (72) > lags (12) by default, but the function validates
+    that for robustness.
     """
     if features is None:
         features = FEATURES_10
     if not include_lags and not include_features:
-        raise ValueError("Al menos uno de include_lags o include_features debe ser True")
+        raise ValueError("At least one of include_lags or include_features must be True")
 
     feature_names: List[str] = []
     blocks: List[np.ndarray] = []
@@ -162,8 +163,8 @@ def build_features_with_lags(
         x_lags = lag_mat[idx]                # (len(idx), lags)
         if np.isnan(x_lags).any():
             raise ValueError(
-                f"lags NaN en idx: primer indice={int(idx[0])}, lags={lags}. "
-                "Los indices deben cumplir t >= lags - 1."
+                f"NaN lags found in idx: first index={int(idx[0])}, lags={lags}. "
+                "Indices must satisfy t >= lags - 1."
             )
         blocks.append(x_lags)
         feature_names.extend([f"lag_{k}" for k in range(lags)])
@@ -179,7 +180,7 @@ def build_features_with_lags(
 
 
 # ---------------------------------------------------------------------------
-# Entrenamiento
+# Training
 # ---------------------------------------------------------------------------
 
 def train_xgboost_h(
@@ -194,17 +195,17 @@ def train_xgboost_h(
     seq_length: int = SEQ_LENGTH,
     verbose: bool = False,
 ) -> Dict:
-    """Entrena XGBoost para un horizonte y devuelve modelo + predicciones test.
+    """Train XGBoost for one horizon and return model + test predictions.
 
-    Devuelve un dict con:
-      - model: XGBRegressor entrenado
-      - y_pred_test, y_true_test: arrays en MGD (sin clipping)
-      - y_pred_val, y_true_val: idem sobre val
-      - timestamps_test: pd.Series alineada con y_*_test (para panel)
-      - feature_names: nombres de las columnas del input
-      - fit_seconds: tiempo de fit
-      - best_iteration: iteracion seleccionada (si early stopping; None si no)
-      - config: dict con horizon, lags, include_*, n_features_used
+    Returns a dict with:
+      - model: trained XGBRegressor
+      - y_pred_test, y_true_test: arrays in MGD (without clipping)
+      - y_pred_val, y_true_val: same on val
+      - timestamps_test: pd.Series aligned with y_*_test (for panel)
+      - feature_names: input column names
+      - fit_seconds: fit time
+      - best_iteration: selected iteration (if early stopping; None otherwise)
+      - config: dict with horizon, lags, include_*, n_features_used
     """
     if xgb_params is None:
         xgb_params = DEFAULT_XGB_PARAMS
