@@ -1,18 +1,18 @@
-# S5 - Analisis de features y redundancia
+# S5 - Feature analysis and redundancy
 
-Diagnostico del valor real (no autoregresivo) de las 20 features oficiales tras excluir `delta_flow_*` (atajo confirmado en iter16/S2). Trabaja sobre el mismo split y los mismos indices alineados que S2 para que las metricas sean directamente comparables.
+Diagnostic of the real (non-autoregressive) value of the 20 official features after excluding `delta_flow_*` (shortcut confirmed in iter16/S2). It uses the same split and the same aligned indices as S2 so the metrics are directly comparable.
 
-## Metodologia
+## Methodology
 
-- **Modelo base**: XGBoost-20 (mismos hiper que S2) reentrenado para H=1.
-- **Permutation importance**: n_repeats=5 sobre subsample de test (n=50,000), shuffling individual de cada feature.
-- **SHAP**: TreeExplainer sobre 5000 filas aleatorias de test (random_state=42).
-- **Correlaciones**: matriz Pearson sobre TRAIN (771,302 filas), clustering jerarquico complete-linkage sobre |1 - r| con corte r>=0.85.
-- **ACF features clave**: lags 1, 6, 12, 24 sobre TRAIN, comparada con la del target (referencia DATASET_STATS section 6).
+- **Base model**: XGBoost-20 (same hyperparameters as S2) retrained for H=1.
+- **Permutation importance**: n_repeats=5 on a test subsample (n=50,000), individual shuffling of each feature.
+- **SHAP**: TreeExplainer on 5000 random test rows (random_state=42).
+- **Correlations**: Pearson matrix on TRAIN (771,302 rows), complete-linkage hierarchical clustering on |1 - r| with cutoff r>=0.85.
+- **ACF of key features**: lags 1, 6, 12, 24 on TRAIN, compared with the target ACF (reference DATASET_STATS section 6).
 
-### Tiempos por etapa
+### Time by stage
 
-| Etapa | Segundos |
+| Stage | Seconds |
 |---|---:|
 | load_parquet | 0.1 |
 | xgb20_fit | 9.0 |
@@ -24,9 +24,9 @@ Diagnostico del valor real (no autoregresivo) de las 20 features oficiales tras 
 | reduced_set | 8.5 |
 | ablation_reduced | 82.1 |
 
-## 1. Native importance (gain) y Permutation importance
+## 1. Native importance (gain) and Permutation importance
 
-`gain_pct` = importancia normalizada del booster (suma 1.0). `PI mean_drop` = caida promedio de NSE al barajar la feature en test. Una feature con PI<=0 se considera ruido (su ablacion no degrada el modelo).
+`gain_pct` = normalized importance of the booster (sums to 1.0). `PI mean_drop` = mean drop in NSE when the feature is shuffled on test. A feature with PI<=0 is considered noise (its ablation does not degrade the model).
 
 | Feature | gain_pct | PI mean_drop | PI std | rank PI |
 |---|---:|---:|---:|---:|
@@ -51,13 +51,13 @@ Diagnostico del valor real (no autoregresivo) de las 20 features oficiales tras 
 | rain_max_60m | 0.0148 | -0.0176 | 0.0008 | 19 |
 | month_sin | 0.0210 | -0.0241 | 0.0050 | 20 |
 
-## 2. SHAP (mean |SHAP|, signo en extremos vs base)
+## 2. SHAP (mean |SHAP|, sign in extremes vs base)
 
-Ranking por importancia media absoluta. `mean_shap_extreme` = SHAP medio en y_true>=25.0 MGD, `mean_shap_base` = SHAP medio en y_true<0.5 MGD. Cambio de signo => contribucion no monotona (la feature empuja arriba en extremos pero abajo en baseflow o viceversa).
+Ranking by mean absolute importance. `mean_shap_extreme` = mean SHAP for y_true>=25.0 MGD, `mean_shap_base` = mean SHAP for y_true<0.5 MGD. Sign change => non-monotonic contribution (the feature pushes upward in extremes but downward in baseflow, or vice versa).
 
 _n_samples=5,000, n_extremos_en_muestra=8, n_base_en_muestra=4638._
 
-| Feature | mean |SHAP| | mean SHAP extremo | mean SHAP base | std SHAP |
+| Feature | mean |SHAP| | mean SHAP extreme | mean SHAP base | std SHAP |
 |---|---:|---:|---:|---:|
 | api_dynamic | 0.3327 | +19.9938 | -0.1714 | 1.3598 |
 | rain_sum_120m | 0.1402 | +3.5535 | -0.0782 | 0.4132 |
@@ -80,31 +80,31 @@ _n_samples=5,000, n_extremos_en_muestra=8, n_base_en_muestra=4638._
 | rain_max_10m | 0.0044 | +0.7097 | -0.0002 | 0.0608 |
 | delta_rain_30m | 0.0044 | +0.3497 | -0.0009 | 0.0309 |
 
-**Features con SHAP no-monotono (signo cambia entre extremos y base):**
-- `rain_in`: extremo +1.8518 vs base -0.0154
-- `temp_daily_f`: extremo +0.4717 vs base -0.0064
-- `api_dynamic`: extremo +19.9938 vs base -0.1714
-- `rain_sum_10m`: extremo +1.6299 vs base -0.0092
-- `rain_sum_15m`: extremo +1.8653 vs base -0.0282
-- `rain_sum_30m`: extremo +2.0685 vs base -0.0132
-- `rain_sum_60m`: extremo -1.2806 vs base +0.0022
-- `rain_sum_120m`: extremo +3.5535 vs base -0.0782
-- `rain_sum_180m`: extremo +0.4530 vs base -0.0039
-- `rain_sum_360m`: extremo +0.6113 vs base -0.0453
-- `rain_max_10m`: extremo +0.7097 vs base -0.0002
-- `rain_max_30m`: extremo +2.0985 vs base -0.0002
-- `rain_max_60m`: extremo -0.8977 vs base +0.0020
-- `minutes_since_last_rain`: extremo +0.0427 vs base -0.0012
-- `delta_rain_10m`: extremo +0.3020 vs base -0.0021
-- `delta_rain_30m`: extremo +0.3497 vs base -0.0009
-- `hour_sin`: extremo -0.5562 vs base +0.0007
-- `month_sin`: extremo +0.1869 vs base -0.0003
+**Features with non-monotonic SHAP (sign changes between extremes and base):**
+- `rain_in`: extreme +1.8518 vs base -0.0154
+- `temp_daily_f`: extreme +0.4717 vs base -0.0064
+- `api_dynamic`: extreme +19.9938 vs base -0.1714
+- `rain_sum_10m`: extreme +1.6299 vs base -0.0092
+- `rain_sum_15m`: extreme +1.8653 vs base -0.0282
+- `rain_sum_30m`: extreme +2.0685 vs base -0.0132
+- `rain_sum_60m`: extreme -1.2806 vs base +0.0022
+- `rain_sum_120m`: extreme +3.5535 vs base -0.0782
+- `rain_sum_180m`: extreme +0.4530 vs base -0.0039
+- `rain_sum_360m`: extreme +0.6113 vs base -0.0453
+- `rain_max_10m`: extreme +0.7097 vs base -0.0002
+- `rain_max_30m`: extreme +2.0985 vs base -0.0002
+- `rain_max_60m`: extreme -0.8977 vs base +0.0020
+- `minutes_since_last_rain`: extreme +0.0427 vs base -0.0012
+- `delta_rain_10m`: extreme +0.3020 vs base -0.0021
+- `delta_rain_30m`: extreme +0.3497 vs base -0.0009
+- `hour_sin`: extreme -0.5562 vs base +0.0007
+- `month_sin`: extreme +0.1869 vs base -0.0003
 
-## 3. Redundancia por correlacion (TRAIN)
+## 3. Redundancy by correlation (TRAIN)
 
 Heatmap: `outputs/figures/diagnostic/s5_corr_matrix.png`.
 
-**Pares con |r| >= 0.85**: 15 (lista completa en JSON). Top 10 por |r|:
+**Pairs with |r| >= 0.85**: 15 (full list in JSON). Top 10 by |r|:
 
 | Feature A | Feature B | r |
 |---|---|---:|
@@ -119,9 +119,9 @@ Heatmap: `outputs/figures/diagnostic/s5_corr_matrix.png`.
 | api_dynamic | rain_sum_30m | +0.906 |
 | rain_sum_60m | rain_max_60m | +0.903 |
 
-**Clusters de redundancia (corte |r| >= 0.85)**: 13 clusters.
+**Redundancy clusters (cutoff |r| >= 0.85)**: 13 clusters.
 
-| # | tamano | representante (max PI) | miembros |
+| # | size | representative (max PI) | members |
 |---|---:|---|---|
 | 1 | 4 | `rain_sum_15m` | `rain_in`, `rain_sum_10m`, `rain_sum_15m`, `rain_max_10m` |
 | 2 | 2 | `temp_daily_f` | `temp_daily_f`, `month_cos` |
@@ -137,9 +137,9 @@ Heatmap: `outputs/figures/diagnostic/s5_corr_matrix.png`.
 | 12 | 1 | `hour_cos` | `hour_cos` |
 | 13 | 1 | `month_sin` | `month_sin` |
 
-## 4. ACF de features clave vs target
+## 4. ACF of key features vs target
 
-ACF muestral en lags 1, 6, 12, 24 sobre TRAIN. Si la ACF de una feature es muy similar a la del target en los mismos lags, es candidata a transportar informacion autoregresiva del target encubierta a traves de su propia inercia.
+Sample ACF at lags 1, 6, 12, 24 on TRAIN. If a feature ACF is very similar to the target ACF at the same lags, it is a candidate for carrying hidden autoregressive information from the target through its own inertia.
 
 | Feature | ACF lag1 | ACF lag6 | ACF lag12 | ACF lag24 |
 |---|---:|---:|---:|---:|
@@ -149,13 +149,13 @@ ACF muestral en lags 1, 6, 12, 24 sobre TRAIN. Si la ACF de una feature es muy s
 | rain_sum_360m | 0.999 | 0.976 | 0.931 | 0.811 |
 | delta_flow_5m | 0.082 | -0.036 | -0.000 | -0.003 |
 
-## 5. Conjunto reducido propuesto y comparativa
+## 5. Proposed reduced set and comparison
 
-Criterio: para cada cluster con |r|>=0.85 se conserva solo la feature con mayor permutation importance; se descartan las demas. Se eliminan ademas las features con PI<=0 (ruido). Si tras filtrar quedan >12 features se conservan las top por PI; si quedan <8 se completa con las siguientes mejores.
+Criterion: for each cluster with |r|>=0.85, keep only the feature with the highest permutation importance and discard the others. Also remove features with PI<=0 (noise). If more than 12 features remain after filtering, keep the top by PI; if fewer than 8 remain, complete with the next best ones.
 
-**Tamano final: 10 features.**
+**Final size: 10 features.**
 
-| # | Feature | PI mean_drop | tamano cluster | miembros del cluster |
+| # | Feature | PI mean_drop | cluster size | cluster members |
 |---|---|---:|---:|---|
 | 1 | `api_dynamic` | +0.4182 | 2 | `api_dynamic`, `rain_sum_60m` |
 | 2 | `rain_sum_360m` | +0.1083 | 1 | `rain_sum_360m` |
@@ -168,53 +168,53 @@ Criterio: para cada cluster con |r|>=0.85 se conserva solo la feature con mayor 
 | 9 | `delta_rain_30m` | +0.0006 | 1 | `delta_rain_30m` |
 | 10 | `rain_sum_30m` | +0.0006 | 2 | `rain_sum_30m`, `rain_max_30m` |
 
-### Comparativa NSE H=1 (test alineado)
+### NSE H=1 comparison (aligned test)
 
-| Modelo | N feats | NSE | RMSE | MAE | Pico pred | Err pico % |
+| Model | N feats | NSE | RMSE | MAE | Pred peak | Peak err % |
 |---|---:|---:|---:|---:|---:|---:|
 | **AR(12) (S2)** | - | 0.8273 | - | - | - | - |
 | **XGB-20 (S2 ref)** | 20 | 0.6619 | 1.398 | 0.276 | 91.4 | -32.4 |
-| **XGB-reducido** | 10 | 0.6980 | 1.321 | 0.271 | 91.8 | -32.1 |
+| **XGB-reduced** | 10 | 0.6980 | 1.321 | 0.271 | 91.8 | -32.1 |
 
-Delta NSE (reducido - XGB-20) = **+0.0361**. Conjunto reducido **MEJORA +0.0361 NSE** sobre XGB-20: la reduccion elimina ruido/features anti-correlacionadas con el target.
+Delta NSE (reduced - XGB-20) = **+0.0361**. The reduced set **IMPROVES NSE by +0.0361** over XGB-20: the reduction removes noise/features that are anti-correlated with the target.
 
-## 6. Atajos encubiertos (ablation 1-by-1 sobre top-PI)
+## 6. Hidden shortcuts (1-by-1 ablation on top-PI)
 
-Sobre el conjunto reducido, ablacion individual de cada feature. Una caida >0.05 NSE al quitarla indica una dependencia muy fuerte: candidata a atajo (o feature genuinamente irreemplazable).
+On the reduced set, individual ablation of each feature. A drop >0.05 NSE when removing it indicates very strong dependence: candidate for a shortcut (or a genuinely irreplaceable feature).
 
-| Feature ablada | NSE sin ella | Delta NSE (caida) | Diagnostico |
+| Ablated feature | NSE without it | Delta NSE (drop) | Diagnostic |
 |---|---:|---:|---|
-| `hour_sin` | 0.6551 | +0.0428 | Aporta valor real |
-| `rain_sum_15m` | 0.6659 | +0.0321 | Aporta valor real |
-| `rain_sum_360m` | 0.6731 | +0.0249 | Aporta valor real |
-| `rain_sum_30m` | 0.6911 | +0.0068 | Marginal o redundante |
-| `delta_rain_30m` | 0.6955 | +0.0024 | Marginal o redundante |
-| `api_dynamic` | 0.6970 | +0.0010 | Marginal o redundante |
-| `delta_rain_10m` | 0.7001 | -0.0022 | Marginal o redundante |
-| `minutes_since_last_rain` | 0.7029 | -0.0050 | Marginal o redundante |
-| `rain_sum_120m` | 0.7072 | -0.0092 | Quitar mejora (probable ruido) |
-| `temp_daily_f` | 0.7158 | -0.0179 | Quitar mejora (probable ruido) |
+| `hour_sin` | 0.6551 | +0.0428 | Provides real value |
+| `rain_sum_15m` | 0.6659 | +0.0321 | Provides real value |
+| `rain_sum_360m` | 0.6731 | +0.0249 | Provides real value |
+| `rain_sum_30m` | 0.6911 | +0.0068 | Marginal or redundant |
+| `delta_rain_30m` | 0.6955 | +0.0024 | Marginal or redundant |
+| `api_dynamic` | 0.6970 | +0.0010 | Marginal or redundant |
+| `delta_rain_10m` | 0.7001 | -0.0022 | Marginal or redundant |
+| `minutes_since_last_rain` | 0.7029 | -0.0050 | Marginal or redundant |
+| `rain_sum_120m` | 0.7072 | -0.0092 | Removing it improves (likely noise) |
+| `temp_daily_f` | 0.7158 | -0.0179 | Removing it improves (likely noise) |
 
-## Hallazgos clave
+## Key findings
 
-1. **Top 5 features por permutation importance**: `api_dynamic`(+0.4182), `rain_sum_360m`(+0.1083), `rain_sum_120m`(+0.0803), `rain_sum_15m`(+0.0368), `rain_sum_180m`(+0.0340). Estas son las que realmente impactan NSE cuando se barajan en test, no necesariamente las que mas usa el booster por gain.
-2. **Redundancia: 15 pares con |r|>=0.85**, agrupados en **13 clusters independientes**. La dimensionalidad efectiva esta mucho mas cerca de 13 que de 20.
-3. **No se detectan atajos encubiertos adicionales**: ninguna feature, tras quitar `delta_flow_*`, causa caida >0.05 NSE en ablation 1-by-1. El conjunto reducido depende repartidamente de varias features.
-4. **Conjunto reducido propuesto (10 features)**: NSE=0.6980 vs XGB-20=0.6619 (delta +0.0361). Mejora (+0.0361 nse sobre xgb-20: al quitar features con pi<=0 se elimina ruido).
-5. **Lluvias largas `rain_sum_180m`(PI=+0.0340), `rain_sum_360m`(PI=+0.1083)**: aportan PI medible: mantener.
-6. **Features con PI <= 0**: `rain_sum_60m`, `rain_max_30m`, `rain_max_60m`, `hour_cos`, `month_sin`, `month_cos`. Su shuffle no degrada el modelo: ruido para esta tarea.
-7. **ACF individual (posible inercia encubierta)**:
-   - `rain_sum_60m` con ACF lag1=0.989, lag12=0.417 (target=0.420): inercia comparable a la del target en lag12 => posible portador de senal autoregresiva encubierta.
-   - `delta_flow_5m` con ACF lag1=0.082: memoria corta, comportamiento tipo diferencia o ruido.
+1. **Top 5 features by permutation importance**: `api_dynamic`(+0.4182), `rain_sum_360m`(+0.1083), `rain_sum_120m`(+0.0803), `rain_sum_15m`(+0.0368), `rain_sum_180m`(+0.0340). These are the ones that actually affect NSE when shuffled on test, not necessarily the ones the booster uses most by gain.
+2. **Redundancy: 15 pairs with |r|>=0.85**, grouped into **13 independent clusters**. The effective dimensionality is much closer to 13 than to 20.
+3. **No additional hidden shortcuts are detected**: after removing `delta_flow_*`, no feature causes a drop >0.05 NSE in 1-by-1 ablation. The reduced set depends in a balanced way on several features.
+4. **Proposed reduced set (10 features)**: NSE=0.6980 vs XGB-20=0.6619 (delta +0.0361). Improvement (+0.0361 nse over xgb-20: removing features with pi<=0 eliminates noise).
+5. **Long rainfall features `rain_sum_180m`(PI=+0.0340), `rain_sum_360m`(PI=+0.1083)**: they provide measurable PI: keep them.
+6. **Features with PI <= 0**: `rain_sum_60m`, `rain_max_30m`, `rain_max_60m`, `hour_cos`, `month_sin`, `month_cos`. Shuffling them does not degrade the model: noise for this task.
+7. **Individual ACF (possible hidden inertia)**:
+   - `rain_sum_60m` with ACF lag1=0.989, lag12=0.417 (target=0.420): inertia comparable to the target at lag12 => possible carrier of hidden autoregressive signal.
+   - `delta_flow_5m` with ACF lag1=0.082: short memory, difference-like or noise-like behavior.
 
-## Veredicto
+## Verdict
 
-Las 20 features oficiales (sin `delta_flow_*`) contienen una redundancia masiva: 15 pares con |r|>=0.85 que se agrupan en 13 clusters casi independientes. La capacidad predictiva real del modelo XGBoost vive en un subespacio mucho mas pequeno.
-
-
-
-El conjunto reducido (10 features) **mejora +0.0361 NSE** sobre XGB-20. Reducir la dimensionalidad no solo no pierde senal sino que limpia ruido: las features con PI<=0 (hour_cos, month_sin, month_cos, rain_sum_60m, rain_max_30m, rain_max_60m) estaban degradando el fit de XGBoost.
+The 20 official features (without `delta_flow_*`) contain massive redundancy: 15 pairs with |r|>=0.85 grouped into 13 nearly independent clusters. The real predictive capacity of the XGBoost model lives in a much smaller subspace.
 
 
 
-Sin features con caida >=0.05 NSE en la ablation, el modelo XGBoost reducido reparte su senal de forma sana entre las features fisicas (lluvia agregada + API + temperatura + estacionalidad). No quedan atajos evidentes que limpiar mas alla de los `delta_flow_*` ya excluidos.
+The reduced set (10 features) **improves NSE by +0.0361** over XGB-20. Reducing dimensionality not only preserves signal but also cleans noise: the features with PI<=0 (`hour_cos`, `month_sin`, `month_cos`, `rain_sum_60m`, `rain_max_30m`, `rain_max_60m`) were degrading the XGBoost fit.
+
+
+
+Without features causing a drop >=0.05 NSE in the ablation, the reduced XGBoost model distributes its signal in a healthy way among the physical features (aggregated rainfall + API + temperature + seasonality). No obvious shortcuts remain to clean up beyond the already excluded `delta_flow_*`.

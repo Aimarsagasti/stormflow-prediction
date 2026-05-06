@@ -1,21 +1,21 @@
 # S1 - Pipeline audit
 
-Auditoria del codigo fuente (rama `diagnostico`, commit c8bfe84). Objetivo: identificar bugs, leakages o decisiones cuestionables mas alla del atajo `delta_flow_*` ya confirmado en iter16.
+Audit of the source code (`diagnostico` branch, commit c8bfe84). Objective: identify bugs, leakages, or questionable decisions beyond the `delta_flow_*` shortcut already confirmed in iter16.
 
-## Resumen
+## Summary
 
 - BUGS: 2
-- SOSPECHOSOS: 5
+- SUSPICIOUS: 5
 - OK: 3
-- Hallazgo principal: **`TwoStageLoss` (src/models/loss.py:163-220) entrena el regresor SOLO sobre muestras con `y_true_real > 0.5 MGD`, pero en inferencia (`TwoStageTCN.predict`, src/models/tcn.py:248-253) el switch duro lo aplica a TODAS las muestras con `p_evento >= 0.3`. Esto produce comportamiento indefinido sobre baseflow con falso positivo y explica el NSE=-14.5 en bucket Base. Ademas, la definicion de evento en la loss (`y > 0.5 MGD`) no coincide con la que usa el DataLoader (`is_event` booleano), por lo que los sample weights y la supervision del clasificador estan optimizando objetivos distintos.** Junto a la puerta trasera ya conocida de `delta_flow_*`, este es el segundo mecanismo por el que el sistema reportado no es una TCN "de verdad": es un AR(1) + un clasificador mal supervisado.
+- Main finding: **`TwoStageLoss` (src/models/loss.py:163-220) trains the regressor ONLY on samples with `y_true_real > 0.5 MGD`, but at inference (`TwoStageTCN.predict`, src/models/tcn.py:248-253) the hard switch applies it to ALL samples with `p_evento >= 0.3`. This produces undefined behavior on baseflow under false positives and explains the NSE=-14.5 in the Base bucket. In addition, the event definition in the loss (`y > 0.5 MGD`) does not match the one used by the DataLoader (`is_event` boolean), so the sample weights and classifier supervision are optimizing different objectives.** Together with the already known backdoor through `delta_flow_*`, this is the second mechanism by which the reported system is not a "real" TCN: it is an AR(1) + a poorly supervised classifier.
 
 ---
 
-## 1. Features derivadas y atajos potenciales
+## 1. Derived features and potential shortcuts
 
-**Verdict: BUG (conocido + agravante)**
+**Verdict: BUG (known + aggravating factor)**
 
-Evidencia: `src/features/engineering.py:115-118`
+Evidence: `src/features/engineering.py:115-118`
 
 ```
 df_feat["delta_flow_5m"] = df_feat["flow_total_mgd"].diff(periods=steps_5m).fillna(0.0)
@@ -24,77 +24,77 @@ df_feat["delta_rain_10m"] = df_feat["rain_in"].diff(periods=steps_10m).fillna(0.
 df_feat["delta_rain_30m"] = df_feat["rain_in"].diff(periods=steps_30m).fillna(0.0)
 ```
 
-Analisis:
-- `delta_flow_5m` y `delta_flow_15m` derivan de `flow_total_mgd = baseflow + stormflow` que tiene r=0.9976 con el target. Es la puerta trasera ya confirmada en iter16 (NSE bajo de 0.861 -> -0.169 al retirarlas). Spearman en evento de `delta_flow_15m` = -0.078 (casi aleatorio), pero la Pearson global es 0.376; en el primer paso tras un salto del target la derivada carga casi toda la senal AR. `DATASET_STATS.md §4` lo refleja explicitamente.
-- Ninguna otra feature derivada del target: `api_dynamic` se calcula solo de `rain_in` y `temp_daily_f` (engineering.py:70-86, recurrencia API = rain(t) + K*API(t-1), K modulado por temperatura). OK.
-- `delta_rain_10m`/`delta_rain_30m` derivan solo de `rain_in`, no del target. OK.
-- **Candidata adicional a vigilar**: `flow_total_mgd` esta presente como COLUMNA en `df_feat` (engineering.py se basa en ella para deltas y la mantiene en `output_columns` a traves de `feature_columns` + target, aunque explicitamente NO esta en la lista `feature_columns` de linea 128-152). Es decir, esta disponible en `df_feat` pero no se pasa al modelo via FEATURE_COLUMNS. Riesgo bajo siempre que los notebooks y `evaluate_local.py` no la vuelvan a anadir accidentalmente. Revisar al revisar iters nuevas.
-- `minutes_since_last_rain` (engineering.py:40-48): causal, derivada solo de `rain_in`. OK.
+Analysis:
+- `delta_flow_5m` and `delta_flow_15m` are derived from `flow_total_mgd = baseflow + stormflow`, which has r=0.9976 with the target. This is the backdoor already confirmed in iter16 (NSE dropped from 0.861 -> -0.169 when removed). Spearman in event regime for `delta_flow_15m` = -0.078 (almost random), but global Pearson is 0.376; in the first step after a jump in the target, the derivative carries almost the entire AR signal. `DATASET_STATS.md §4` shows this explicitly.
+- No other feature is derived from the target: `api_dynamic` is computed only from `rain_in` and `temp_daily_f` (engineering.py:70-86, API recurrence = rain(t) + K*API(t-1), with K modulated by temperature). OK.
+- `delta_rain_10m`/`delta_rain_30m` are derived only from `rain_in`, not from the target. OK.
+- **Additional candidate to monitor**: `flow_total_mgd` is present as a COLUMN in `df_feat` (engineering.py uses it for deltas and keeps it in `output_columns` through `feature_columns` + target, although it is explicitly NOT in the `feature_columns` list on lines 128-152). That is, it is available in `df_feat` but is not passed to the model through FEATURE_COLUMNS. Low risk as long as the notebooks and `evaluate_local.py` do not accidentally add it back. Recheck when reviewing new iterations.
+- `minutes_since_last_rain` (engineering.py:40-48): causal, derived only from `rain_in`. OK.
 
-Sigue siendo el mecanismo principal del atajo. Iter16 ya lo elimino de FEATURE_COLUMNS en el notebook, pero las columnas se siguen creando en `engineering.py` y pueden reaparecer facilmente.
-
----
-
-## 2. Split cronologico y cruce de ventanas train/val/test
-
-**Verdict: BUG (LEAKAGE MODERADO DE FEATURES, NO DEL TARGET)**
-
-Evidencia:
-- `src/pipeline/split.py:44-46`: `df_train = df_sorted.iloc[:train_end]; df_val = df_sorted.iloc[train_end:val_end]; df_test = df_sorted.iloc[val_end:]`. Corte estricto por indice (no por timestamp pero equivalente tras `sort_values("timestamp")`).
-- `src/pipeline/sequences.py:65-70`: las ventanas se construyen DENTRO de cada split, usando solo `feature_matrix` y `target_array` del propio `df_split`.
-
-Analisis:
-- Bueno: ninguna ventana cruza fronteras entre splits, porque `_build_window_arrays` opera sobre un solo `df_split` a la vez. No hay leakage directo del target de un split al otro.
-- Pero: las features acumuladas rolling de `engineering.py` (`rain_sum_*`, `rain_max_*`, `api_dynamic`, `minutes_since_last_rain`) se calculan en `create_features(df_clean)` ANTES del split. Por tanto, el primer registro de `df_val` tiene en sus `rain_sum_360m` valores que incluyen lluvia de las ultimas 6h de `df_train`, y equivalente en test. Esto NO es leakage del target, pero si "contaminacion" de features: los primeros ~72-360 pasos de cada split (dependiendo de la ventana mas larga) tienen informacion del split anterior.
-- Consecuencia practica: minima para el modelo (es solo una continuidad temporal fisicamente razonable, el API es acumulativo real), pero invalida la idea de que `df_val` y `df_test` son "experimentos independientes". Si el TFM quiere reportar metricas de test limpias es facil arreglarlo: calcular features por split o descartar los primeros N pasos de val/test. Recomendable documentarlo.
-- `split_chronological` no aplica gap/buffer entre splits. Si por algun motivo se replican timestamps (no es el caso aqui tras `drop_duplicates`/`sort`), habria riesgo; con los datos reales es limpio.
+This remains the main shortcut mechanism. Iter16 already removed it from FEATURE_COLUMNS in the notebook, but the columns are still created in `engineering.py` and can easily reappear.
 
 ---
 
-## 3. Normalizacion y posible doble normalizacion
+## 2. Chronological split and crossing of train/val/test windows
 
-**Verdict: BUG (latente, no siempre activo)**
+**Verdict: BUG (MODERATE FEATURE LEAKAGE, NOT TARGET LEAKAGE)**
 
-Evidencia: `src/pipeline/normalize.py:71`
+Evidence:
+- `src/pipeline/split.py:44-46`: `df_train = df_sorted.iloc[:train_end]; df_val = df_sorted.iloc[train_end:val_end]; df_test = df_sorted.iloc[val_end:]`. Strict split by index (not by timestamp, but equivalent after `sort_values("timestamp")`).
+- `src/pipeline/sequences.py:65-70`: windows are built WITHIN each split, using only `feature_matrix` and `target_array` from the corresponding `df_split`.
+
+Analysis:
+- Good: no window crosses boundaries between splits, because `_build_window_arrays` operates on a single `df_split` at a time. There is no direct target leakage from one split into another.
+- But: the rolling accumulated features from `engineering.py` (`rain_sum_*`, `rain_max_*`, `api_dynamic`, `minutes_since_last_rain`) are computed in `create_features(df_clean)` BEFORE the split. Therefore, the first record of `df_val` has `rain_sum_360m` values that include rainfall from the last 6h of `df_train`, and similarly for test. This is NOT target leakage, but it is feature "contamination": the first ~72-360 steps of each split (depending on the longest window) contain information from the previous split.
+- Practical consequence: minimal for the model (it is just physically reasonable temporal continuity, and API is truly accumulative), but it invalidates the idea that `df_val` and `df_test` are "independent experiments." If the TFM wants to report clean test metrics, it is easy to fix: compute features per split or discard the first N steps of val/test. Recommended to document it.
+- `split_chronological` does not apply a gap/buffer between splits. If timestamps were duplicated for some reason (not the case here after `drop_duplicates`/`sort`), there would be risk; with the real data it is clean.
+
+---
+
+## 3. Normalization and possible double normalization
+
+**Verdict: BUG (latent, not always active)**
+
+Evidence: `src/pipeline/normalize.py:71`
 
 ```
 all_norm_columns = list(feature_columns) + [target_col]
 ```
 
-Analisis:
-- Las estadisticas (`mean`, `std`) se calculan SOLO sobre `train_transformed` (normalize.py:75-82). OK: no hay leakage de val/test a stats.
-- Pero si `target_col` ya esta dentro de `feature_columns` (caso conSF, cuando se pasa `stormflow_mgd` como autoregresivo), la linea 71 lo incluye DOS VECES en la lista de columnas a escalar. `_zscore_scale` (normalize.py:42-46) itera y aplica `(x - mean) / std` sobre la misma columna in-place en la copia, por lo que se normaliza dos veces. Es exactamente el bug descrito en `AGENTS.md §11`.
-- El codigo fuente de `normalize.py` NO esta arreglado. La correccion vive SOLO en los callers:
+Analysis:
+- Statistics (`mean`, `std`) are computed ONLY on `train_transformed` (normalize.py:75-82). OK: there is no leakage from val/test into stats.
+- But if `target_col` is already inside `feature_columns` (conSF case, when `stormflow_mgd` is passed as autoregressive input), line 71 includes it TWICE in the list of columns to scale. `_zscore_scale` (normalize.py:42-46) iterates and applies `(x - mean) / std` on the same column in-place on the copy, so it gets normalized twice. This is exactly the bug described in `AGENTS.md §11`.
+- The source code in `normalize.py` is NOT fixed. The correction exists ONLY in the callers:
   - `evaluate_local.py:368`: `features_for_norm = [f for f in features if f != TARGET_COL]` (OK).
-  - `notebooks/rescate_colab_2026-04-17/horizon_comparison_v2.py:270, 610, 830`: filtra antes de llamar (OK).
-  - `notebooks/rescate_colab_2026-04-17/claude_train.py:181, 1028`: NO filtra, pero el iter16 actual no incluye `stormflow_mgd` en `FEATURE_COLUMNS`, asi que no se dispara. Si manana se reintroduce un experimento conSF desde ese notebook, vuelve el bug.
-- Recomendacion: fijar el bug dentro de `normalize_splits` (dedup con `dict.fromkeys(all_norm_columns)` o aviso explicito) y no depender de que el caller se acuerde. Es el tipo de bug que la pipeline deberia prohibir por construccion.
+  - `notebooks/rescate_colab_2026-04-17/horizon_comparison_v2.py:270, 610, 830`: filters before calling (OK).
+  - `notebooks/rescate_colab_2026-04-17/claude_train.py:181, 1028`: does NOT filter, but current iter16 does not include `stormflow_mgd` in `FEATURE_COLUMNS`, so it does not trigger. If a conSF experiment is reintroduced from that notebook tomorrow, the bug returns.
+- Recommendation: fix the bug inside `normalize_splits` itself (dedup with `dict.fromkeys(all_norm_columns)` or an explicit warning) and do not depend on the caller remembering to do it. This is the kind of bug the pipeline should forbid by construction.
 
-Verificacion adicional OK:
-- `normalize_target_values` (normalize.py:105-114) y `denormalize_target` (117-130) aplican log1p/expm1 condicionalmente segun `norm_params["log1p_columns"]`. Simetricos. OK.
-- log1p se aplica antes de calcular mean/std (normalize.py:67), lo cual es el orden correcto.
-
----
-
-## 4. Definicion de `is_event`
-
-**Verdict: OK**
-
-Evidencia: `src/data/clean.py:9-23, 76`.
-
-Analisis:
-- `_build_event_mask` usa timestamps con `searchsorted` sobre `event_start`/`event_end` provenientes del fichero de eventos del MSD (no calculado desde el target). Marca `is_event=True` si `t in [event_start, event_end)`.
-- NO mira al futuro del TARGET: la ventana temporal viene de la definicion externa (ficheros de tormentas del MSD). No hay leakage de `stormflow_mgd` hacia `is_event`.
-- Sin embargo, fisicamente `event_start`/`event_end` SI incluyen el momento del pico, y ese momento ES el target que el modelo intenta predecir. Esto significa que `is_event[t+h]` puede codificar "en t+h ya estamos dentro de una tormenta", que es lo que se intenta predecir. El Dataset (sequences.py:51, 70) usa `event_array[target_index]` como `event_target`, lo cual es legitimo como label de supervision multitarea, pero NO se puede usar `is_event` como FEATURE de la ventana de entrada sin introducir leakage.
-- Revisar: no se usa como feature. En `engineering.py:154` se incluye en `output_columns` como columna auxiliar, y en `sequences.py:51` se extrae como `event_array` para el DataLoader (no entra en `feature_matrix`). OK.
+Additional verification OK:
+- `normalize_target_values` (normalize.py:105-114) and `denormalize_target` (117-130) apply log1p/expm1 conditionally according to `norm_params["log1p_columns"]`. Symmetric. OK.
+- log1p is applied before computing mean/std (normalize.py:67), which is the correct order.
 
 ---
 
-## 5. Construccion de ventanas (leakage temporal)
+## 4. Definition of `is_event`
 
 **Verdict: OK**
 
-Evidencia: `src/pipeline/sequences.py:65-70`.
+Evidence: `src/data/clean.py:9-23, 76`.
+
+Analysis:
+- `_build_event_mask` uses timestamps with `searchsorted` on `event_start`/`event_end` from the MSD event file (not computed from the target). It marks `is_event=True` if `t in [event_start, event_end)`.
+- It does NOT look into the future of the TARGET: the time window comes from the external definition (MSD storm files). There is no leakage from `stormflow_mgd` into `is_event`.
+- However, physically, `event_start`/`event_end` DO include the moment of the peak, and that moment IS the target the model is trying to predict. This means that `is_event[t+h]` can encode "at t+h we are already inside a storm," which is what the model is trying to predict. The Dataset (sequences.py:51, 70) uses `event_array[target_index]` as `event_target`, which is legitimate as a multitask supervision label, but `is_event` cannot be used as an INPUT feature without introducing leakage.
+- Review: it is not used as a feature. In `engineering.py:154` it is included in `output_columns` as an auxiliary column, and in `sequences.py:51` it is extracted as `event_array` for the DataLoader (it does not enter `feature_matrix`). OK.
+
+---
+
+## 5. Window construction (temporal leakage)
+
+**Verdict: OK**
+
+Evidence: `src/pipeline/sequences.py:65-70`.
 
 ```
 for end_index in range(seq_length - 1, max_end_index + 1):
@@ -104,19 +104,19 @@ for end_index in range(seq_length - 1, max_end_index + 1):
     windows_y.append(float(target_array[target_index]))              # y(t + horizon)
 ```
 
-Analisis:
-- Ventana de input: `[end_index - seq_length + 1, end_index]` inclusive = 72 pasos.
-- Target: `feature_matrix` cubre hasta el indice `end_index`; target se toma en `end_index + horizon` con `horizon >= 1`. El target NUNCA entra en la ventana de input. Correcto.
-- El bucle empieza en `seq_length - 1` (ventana completa disponible) y acaba en `max_end_index = total_rows - horizon - 1`, garantizando `target_index` valido.
-- Un comentario: con `horizon=1`, `end_index+1` es el target, y el ultimo elemento del input (`end_index`) es `t`. El modelo tiene acceso a `features[t]` (incluyendo `delta_flow_5m[t]` y en conSF a `stormflow_mgd[t]`). Para conSF esto es AR(1) explicito y `stormflow[t]` tiene autocorrelacion 0.909 con `stormflow[t+1]`, de donde salen los NSE altos reportados. No es leakage del futuro, pero si confirma por que el naive bate casi al modelo.
+Analysis:
+- Input window: `[end_index - seq_length + 1, end_index]` inclusive = 72 steps.
+- Target: `feature_matrix` covers up to index `end_index`; the target is taken at `end_index + horizon` with `horizon >= 1`. The target NEVER enters the input window. Correct.
+- The loop starts at `seq_length - 1` (full window available) and ends at `max_end_index = total_rows - horizon - 1`, guaranteeing a valid `target_index`.
+- One comment: with `horizon=1`, `end_index+1` is the target, and the last input element (`end_index`) is `t`. The model has access to `features[t]` (including `delta_flow_5m[t]` and in conSF `stormflow_mgd[t]`). For conSF this is explicit AR(1), and `stormflow[t]` has autocorrelation 0.909 with `stormflow[t+1]`, which is where the reported high NSE values come from. It is not future leakage, but it does confirm why the naive baseline almost matches the model.
 
 ---
 
-## 6. Loss del two-stage
+## 6. Two-stage loss
 
-**Verdict: BUG (A2 CONFIRMADO) + SOSPECHOSO (A3 codigo muerto) + SOSPECHOSO (doble definicion de evento)**
+**Verdict: BUG (A2 CONFIRMED) + SUSPICIOUS (A3 dead code) + SUSPICIOUS (double event definition)**
 
-Evidencia: `src/models/loss.py:182-211`.
+Evidence: `src/models/loss.py:182-211`.
 
 ```
 y_true_real = self._denormalize_target(y_true)
@@ -132,40 +132,40 @@ else:
     reg_loss = torch.zeros(...)
 ```
 
-Analisis:
+Analysis:
 
-**A2 (BUG, ALTO)**: El regresor se entrena EXCLUSIVAMENTE sobre muestras con `y_true_real > 0.5`. Nunca ve baseflow. Pero en inferencia (`src/models/tcn.py:248-253`):
+**A2 (BUG, HIGH)**: the regressor is trained EXCLUSIVELY on samples with `y_true_real > 0.5`. It never sees baseflow. But at inference (`src/models/tcn.py:248-253`):
 
 ```
 return torch.where(cls_prob >= threshold, reg_value, zeros)
 ```
 
-Con `threshold=0.3` (trainer.py:247), cualquier falso positivo del clasificador sobre una muestra de baseflow dispara el regresor sobre un input OOD (out-of-distribution). El regresor tiene libertad total en esa region (nunca penalizado alli) y produce predicciones arbitrarias. Esto casa con `local_eval_metrics.json` que reporta bucket Base con NSE=-14.5 y bias +0.21 MGD: no es ruido, es comportamiento indefinido.
+With `threshold=0.3` (trainer.py:247), any false positive from the classifier on a baseflow sample triggers the regressor on an OOD (out-of-distribution) input. The regressor has complete freedom in that region (it is never penalized there) and produces arbitrary predictions. This matches `local_eval_metrics.json`, which reports the Base bucket with NSE=-14.5 and bias +0.21 MGD: it is not noise, it is undefined behavior.
 
-**Doble definicion de evento (SOSPECHOSO)**:
-- En el loss (loss.py:183), `event_label = (y_true_real > 0.5 MGD)`.
-- En el DataLoader (sequences.py:51, 70), `event_array = df_split[aux_col]` donde `aux_col="is_event"` proviene del fichero MSD (clean.py:76).
-- `_compute_sample_weights` (sequences.py:100) usa `event_array` (is_event MSD) para dar +1.75x boost.
-- Pero `TwoStageLoss` usa `y > 0.5 MGD` (loss.py:183). Son supervisiones distintas sobre el mismo clasificador: los pesos de muestra premian estar en ventana MSD, mientras que el BCE optimiza `y > 0.5 MGD`. Si `is_event` y `y>0.5` no coinciden 100%, los gradientes de clasificacion y los pesos de muestra estan tirando en direcciones distintas.
+**Double event definition (SUSPICIOUS)**:
+- In the loss (loss.py:183), `event_label = (y_true_real > 0.5 MGD)`.
+- In the DataLoader (sequences.py:51, 70), `event_array = df_split[aux_col]` where `aux_col="is_event"` comes from the MSD file (clean.py:76).
+- `_compute_sample_weights` (sequences.py:100) uses `event_array` (MSD `is_event`) to apply a +1.75x boost.
+- But `TwoStageLoss` uses `y > 0.5 MGD` (loss.py:183). These are different supervision signals for the same classifier: sample weights reward being inside the MSD window, while BCE optimizes `y > 0.5 MGD`. If `is_event` and `y>0.5` do not coincide 100%, the classification gradients and the sample weights pull in different directions.
 
-**A3 (SOSPECHOSO, codigo muerto)**: `CompositeLoss` (loss.py:14-110) existe pero no se usa en el training actual (`claude_train.py` importa `CompositeLoss, TwoStageLoss` pero solo instancia `TwoStageLoss` en lineas 382 y 1090). Es codigo antiguo de iteraciones previas. Su rama `thresholds_are_normalized` + `norm_params` (loss.py:34-42) facilita confundir al lector sobre si los umbrales viven en MGD o en espacio normalizado. En `TwoStageLoss` los umbrales NO existen porque la loss compara en espacio normalizado y desnormaliza internamente solo para definir `event_label`. Eliminar `CompositeLoss` o marcarlo deprecado.
+**A3 (SUSPICIOUS, dead code)**: `CompositeLoss` (loss.py:14-110) exists but is not used in the current training (`claude_train.py` imports `CompositeLoss, TwoStageLoss` but only instantiates `TwoStageLoss` on lines 382 and 1090). It is old code from previous iterations. Its branch `thresholds_are_normalized` + `norm_params` (loss.py:34-42) makes it easy to confuse the reader about whether thresholds live in real MGD or in normalized space. In `TwoStageLoss` those thresholds do NOT exist because the loss compares in normalized space and only denormalizes internally to define `event_label`. Remove `CompositeLoss` or mark it deprecated.
 
-**Sample weights en espacio normalizado (A3 de Opus, MENOR)**: `_compute_quantile_thresholds` (sequences.py:79-87) calcula p95/p99/p999 sobre `df_train[target_col]` cuando ya esta log1p + z-score (confirmado: `claude_train.py:180-181` llama `normalize_splits` ANTES de `create_dataloaders`). Los umbrales viven en espacio normalizado; `_compute_sample_weights` (sequences.py:95-103) compara `y_array` normalizado contra ellos. Internamente consistente, pero los valores impresos en consola (`"Weight thresholds(train): {p95: X, p99: Y}"`, sequences.py:228) NO son MGD reales, lo cual puede confundir al leer logs. No es bug, pero es trampa futura.
+**Sample weights in normalized space (A3 from Opus, MINOR)**: `_compute_quantile_thresholds` (sequences.py:79-87) computes p95/p99/p999 over `df_train[target_col]` when it is already log1p + z-score (confirmed: `claude_train.py:180-181` calls `normalize_splits` BEFORE `create_dataloaders`). The thresholds live in normalized space; `_compute_sample_weights` (sequences.py:95-103) compares normalized `y_array` against them. Internally consistent, but the values printed to the console (`"Weight thresholds(train): {p95: X, p99: Y}"`, sequences.py:228) are NOT real MGD, which can be confusing when reading logs. Not a bug, but a future trap.
 
 ---
 
-## 7. Doble normalizacion de `stormflow_mgd`
+## 7. Double normalization of `stormflow_mgd`
 
-**Verdict: BUG latente** (ver tambien punto 3).
+**Verdict: latent BUG** (see also point 3).
 
-Evidencia:
-- El bug VIVE en `src/pipeline/normalize.py:71` (no corregido).
-- Corregido por WORKAROUND en callers:
-  - `evaluate_local.py:368`: filtra antes de llamar.
-  - `horizon_comparison_v2.py:270, 610, 830`: filtra antes de llamar.
-- NO corregido en `notebooks/rescate_colab_2026-04-17/claude_train.py:181, 1028`: pasa FEATURE_COLUMNS completo. En iter16 actual `stormflow_mgd` no esta en `FEATURE_COLUMNS`, asi que no se dispara, pero el bug latente queda.
+Evidence:
+- The bug LIVES in `src/pipeline/normalize.py:71` (not fixed).
+- Fixed by WORKAROUND in callers:
+  - `evaluate_local.py:368`: filters before calling.
+  - `horizon_comparison_v2.py:270, 610, 830`: filters before calling.
+- NOT fixed in `notebooks/rescate_colab_2026-04-17/claude_train.py:181, 1028`: passes the full FEATURE_COLUMNS. In current iter16 `stormflow_mgd` is not in `FEATURE_COLUMNS`, so it does not trigger, but the latent bug remains.
 
-Evaluacion: el codigo fuente oficial (`normalize.py`) NO contiene la correccion. Cualquier refactor o notebook futuro que pase una lista con `stormflow_mgd` incluido reintroduce el bug silenciosamente. Es exactamente el tipo de bug que la pipeline deberia impedir por construccion. Arreglarlo en la propia funcion es trivial:
+Evaluation: the official source code (`normalize.py`) does NOT contain the correction. Any future refactor or notebook that passes a list including `stormflow_mgd` silently reintroduces the bug. This is exactly the kind of bug the pipeline should prevent by construction. Fixing it in the function itself is trivial:
 
 ```python
 all_norm_columns = list(dict.fromkeys(list(feature_columns) + [target_col]))
@@ -173,15 +173,15 @@ all_norm_columns = list(dict.fromkeys(list(feature_columns) + [target_col]))
 
 ---
 
-## 8. Alineamiento del predictor naive
+## 8. Alignment of the naive predictor
 
-**Verdict: SOSPECHOSO (A5 de Opus confirmado)**
+**Verdict: SUSPICIOUS (A5 from Opus confirmed)**
 
-Evidencia:
+Evidence:
 - `scripts/generate_dataset_stats.py:1046-1079`:
 
 ```
-df_test = splits["test"]                 # df_test completo SIN descartar los 72 primeros
+df_test = splits["test"]                 # full df_test WITHOUT discarding the first 72 rows
 target_series = df_test[TARGET_COLUMN].to_numpy()
 ...
 y_true = target_series[h:]               # [h, ..., N-1]
@@ -189,20 +189,20 @@ y_pred_naive = target_series[:-h]        # [0, ..., N-1-h]
 nse_naive = _nse(y_true, y_pred_naive)
 ```
 
-- Compara contra `model_nse_sin_sf = {1: 0.861, ...}` que vive en `outputs/data_analysis/local_eval_metrics.json`, calculado por `evaluate_local.py` sobre el rango `test[seq_length+horizon-1 : ]` (el modelo descarta los 72 primeros pasos del test, evaluate_local.py:755 `offset = SEQ_LENGTH + horizon - 1`).
+- It compares against `model_nse_sin_sf = {1: 0.861, ...}` from `outputs/data_analysis/local_eval_metrics.json`, computed by `evaluate_local.py` on the range `test[seq_length+horizon-1 : ]` (the model discards the first 72 steps of test, evaluate_local.py:755 `offset = SEQ_LENGTH + horizon - 1`).
 
-Analisis:
-- El NSE del naive se calcula sobre TODO el test set (~165k muestras), mientras que el NSE del modelo se calcula sobre test[72+h-1:] (~164.8k muestras, 72 pasos menos). La diferencia en muestras es muy pequena, pero el denominador NSE depende del rango y puede cambiar en el 3er decimal.
-- Mas importante: los primeros 72 puntos del test caen justo en el arranque, que suele ser un periodo tranquilo (el test empieza en un limite cronologico cualquiera). La diferencia es minima pero el NSE reportado del naive (0.811 en `DATASET_STATS §8` vs 0.826 en `STATE.md`) sugiere que se esta calculando de dos formas distintas. Hay que alinear.
-- Fix trivial: descartar los primeros `seq_length+horizon-1` puntos del test tambien en el calculo del naive. Sin ese fix, la comparacion "ganancia +0.050 NSE" no es rigurosa.
+Analysis:
+- The naive NSE is computed on the ENTIRE test set (~165k samples), while the model NSE is computed on `test[72+h-1:]` (~164.8k samples, 72 fewer steps). The sample difference is very small, but the NSE denominator depends on the range and can change in the 3rd decimal.
+- More importantly: the first 72 points of test fall right at the start, which is usually a calm period (test begins at an arbitrary chronological boundary). The difference is minimal, but the reported naive NSE (0.811 in `DATASET_STATS §8` vs 0.826 in `STATE.md`) suggests it is being computed in two different ways. It must be aligned.
+- Trivial fix: also discard the first `seq_length+horizon-1` points of test in the naive calculation. Without that fix, the comparison "gain +0.050 NSE" is not rigorous.
 
 ---
 
-## 9. Inferencia (switch duro) y falsos positivos del clasificador
+## 9. Inference (hard switch) and classifier false positives
 
-**Verdict: BUG (consecuencia directa de A2, mismo bug que el punto 6)**
+**Verdict: BUG (direct consequence of A2, same bug as point 6)**
 
-Evidencia: `src/models/tcn.py:248-253` + `src/training/trainer.py:247`.
+Evidence: `src/models/tcn.py:248-253` + `src/training/trainer.py:247`.
 
 ```
 def predict(self, x, threshold=0.5):
@@ -210,56 +210,56 @@ def predict(self, x, threshold=0.5):
     return torch.where(cls_prob >= threshold, reg_value, zeros)
 ```
 
-En `predict()` de trainer.py se llama con `threshold=0.3`:
+In `predict()` from trainer.py it is called with `threshold=0.3`:
 
 ```
 y_pred = model.predict(x_batch, threshold=0.3)
 ```
 
-Analisis:
-- Con threshold=0.3 la recall sube a costa de precision -> mas falsos positivos.
-- Cada falso positivo activa el regresor, que solo vio muestras con `y_real > 0.5 MGD` en training -> prediccion OOD.
-- En lugar del switch duro, un fix limpio es entrenar el regresor sobre TODAS las muestras (con peso de magnitud, que ya se calcula) y mantener el switch solo como filtro de baja magnitud. Asi el regresor tiene definicion valida en baseflow y no explota con falsos positivos. Es el fix C1-2 que sugiere Opus 4.7.
+Analysis:
+- With `threshold=0.3`, recall increases at the expense of precision -> more false positives.
+- Each false positive activates the regressor, which only saw samples with `y_real > 0.5 MGD` during training -> OOD prediction.
+- Instead of the hard switch, a clean fix is to train the regressor on ALL samples (with magnitude weighting, which is already computed) and keep the switch only as a low-magnitude filter. That way the regressor has a valid definition on baseflow and does not blow up under false positives. This is fix C1-2 suggested by Opus 4.7.
 
 ---
 
-## 10. Criterio de "eventos extremos sin lluvia"
+## 10. Criterion for "extreme events without rainfall"
 
-**Verdict: SOSPECHOSO (criterio cambio entre ejecuciones)**
+**Verdict: SUSPICIOUS (criterion changes between runs)**
 
-Evidencia:
-- `evaluate_local.py:606-655`: cuenta "extremos con/sin lluvia" iterando sobre `y_real > 50` en el vector de predicciones (tras el offset de 72 pasos), y para cada uno chequea si `rain_sum_60m > 0` en la ventana de 72 pasos anteriores a `df_idx = OFFSET + idx` de `df_test` (df_test YA NORMALIZADO porque el caller pasa el df normalizado a los plots... revisar). Criterio: "alguna muestra en las 6h previas tiene `rain_sum_60m > 0`".
-- `scripts/generate_dataset_stats.py:502-507`: cuenta extremos donde `rain_sum_60m < 0.01` en el INSTANTE del pico (no ventana). Criterio diferente.
-- El comentario en 507-509 admite que no son el mismo criterio: "No es la definicion exacta (la real usa la ventana de entrada del modelo) pero da orden de magnitud".
+Evidence:
+- `evaluate_local.py:606-655`: counts "extremes with/without rainfall" by iterating over `y_real > 50` in the prediction vector (after the 72-step offset), and for each one checks whether `rain_sum_60m > 0` appears in the 72-step input window before `df_idx = OFFSET + idx` in `df_test` (`df_test` is ALREADY NORMALIZED because the caller passes the normalized df to the plots... verify). Criterion: "some sample in the previous 6h has `rain_sum_60m > 0`".
+- `scripts/generate_dataset_stats.py:502-507`: counts extremes where `rain_sum_60m < 0.01` at the PEAK INSTANT (not a window). Different criterion.
+- The comment in 507-509 admits they are not the same criterion: "It is not the exact definition (the real one uses the model input window) but gives the right order of magnitude."
 
-Analisis:
-- Por eso el dato "15 de 59 extremos sin lluvia" de docs antiguos (instante del pico) no cuadra con "0 extremos sin lluvia" de iter16 (ventana de 72 pasos). El criterio se flexibilizo: una tormenta real casi siempre tiene ALGUNA lluvia en las 6h previas, aunque el pico suceda cuando ya dejo de llover. Ambos numeros pueden ser correctos, solo miden cosas diferentes.
-- Hay una sutileza adicional: `evaluate_local.py:640` comprueba `rain_sum_60m > 0`, que es un acumulado rolling. En el dataset crudo `rain_sum_60m` en el minuto t recoge lluvia del intervalo [t-60min, t]; si hubo lluvia ligera hace 4h, `rain_sum_60m` ya lleva 3h en cero pero la ventana de 72 pasos todavia contiene el pulso antiguo al inicio. Eso hace que la deteccion sea muy permisiva: basta UN paso con `rain_sum_60m > 0` en 6h de ventana para marcar "con lluvia".
-- Sub-bug adicional: line 635 `window_df = df_test.iloc[win_start:win_end]` usa el df_test del caller. Si ese df_test esta NORMALIZADO (log1p+z), `rain_sum_60m > 0` cambia de umbral fisico (log1p(0) es 0 y z-score(0) puede ser negativo, asi que "> 0" es una comparacion distinta en ese espacio). Revisar `main()` para ver que df_test pasa al plot.
+Analysis:
+- That is why the figure "15 of 59 extremes without rainfall" from older docs (peak instant) does not match "0 extremes without rainfall" from iter16 (72-step window). The criterion was relaxed: a real storm almost always has SOME rainfall in the previous 6h, even if the peak happens after rainfall has already stopped. Both numbers can be correct; they simply measure different things.
+- There is an additional subtlety: `evaluate_local.py:640` checks `rain_sum_60m > 0`, which is a rolling sum. In the raw dataset, `rain_sum_60m` at minute t collects rainfall over [t-60min, t]; if there was light rainfall 4h earlier, `rain_sum_60m` has already been zero for 3h, but the 72-step window still contains the old pulse at the beginning. That makes the detection very permissive: a single step with `rain_sum_60m > 0` in a 6h window is enough to mark "with rainfall."
+- Additional sub-bug: line 635 `window_df = df_test.iloc[win_start:win_end]` uses the caller's `df_test`. If that `df_test` is NORMALIZED (log1p+z), `rain_sum_60m > 0` changes its physical threshold (`log1p(0)` is 0 and z-score(0) may be negative, so `> 0` is a different comparison in that space). Check `main()` to see which `df_test` gets passed to the plot.
 
-Conclusion: la cifra "0 extremos sin lluvia" de iter16 puede ser correcta, pero bajo un criterio muy laxo. Para un TFM serio hay que:
-1. Fijar un criterio unico (propongo: `rain_sum_180m > 0.05 pulgadas` en el instante del pico, o acumulado de la ventana >= 0.1).
-2. Documentarlo.
-3. Recalcular ambas estadisticas con el mismo criterio.
+Conclusion: the figure "0 extremes without rainfall" in iter16 may be correct, but under a very lax criterion. For a serious TFM it is necessary to:
+1. Fix a single criterion (I propose: `rain_sum_180m > 0.05 pulgadas` at the peak instant, or accumulated rainfall over the window >= 0.1).
+2. Document it.
+3. Recompute both statistics under the same criterion.
 
 ---
 
-## Recomendaciones accionables (prioritarias)
+## Actionable recommendations (priority)
 
-1. **[ALTO] Arreglar A2 en `src/models/loss.py:182-211`**: entrenar el regresor sobre todas las muestras (no solo `event_mask`), manteniendo los pesos por magnitud. Mantener el switch duro solo como filtro de baja magnitud en inferencia. Elimina el comportamiento OOD sobre baseflow con falsos positivos y unifica la supervision. Prob. de mejorar bucket Base drasticamente (NSE=-14.5 -> algo razonable).
+1. **[HIGH] Fix A2 in `src/models/loss.py:182-211`**: train the regressor on all samples (not only `event_mask`), keeping the magnitude weights. Keep the hard switch only as a low-magnitude filter at inference. This removes OOD behavior on baseflow under false positives and unifies supervision. Likely to drastically improve the Base bucket (NSE=-14.5 -> something reasonable).
 
-2. **[ALTO] Unificar la definicion de evento**: decidir si el clasificador debe predecir `is_event` (ventana MSD) o `y > 0.5 MGD` (umbral de stormflow). Hoy `TwoStageLoss` (loss.py:183) usa uno y los sample weights (sequences.py:100) usan el otro. Un solo criterio consistente.
+2. **[HIGH] Unify the event definition**: decide whether the classifier should predict `is_event` (MSD window) or `y > 0.5 MGD` (stormflow threshold). Today `TwoStageLoss` (loss.py:183) uses one and the sample weights (sequences.py:100) use the other. A single consistent criterion.
 
-3. **[MEDIO] Arreglar el bug de doble normalizacion DENTRO de `src/pipeline/normalize.py:71`**: dedup con `dict.fromkeys`. No depender de que el caller filtre. Bug latente que vuelve en cualquier experimento conSF futuro lanzado desde el notebook principal.
+3. **[MEDIUM] Fix the double normalization bug INSIDE `src/pipeline/normalize.py:71`**: dedup with `dict.fromkeys`. Do not depend on the caller filtering it out. Latent bug that returns in any future conSF experiment launched from the main notebook.
 
-4. **[MEDIO] Alinear naive y modelo sobre el mismo rango de indices en `scripts/generate_dataset_stats.py:compute_section_8_naive_baseline`**: descartar `seq_length + horizon - 1` puntos al inicio del test antes de calcular NSE naive. Explica la discrepancia 0.811 vs 0.826.
+4. **[MEDIUM] Align naive and model on the same index range in `scripts/generate_dataset_stats.py:compute_section_8_naive_baseline`**: discard `seq_length + horizon - 1` points at the start of test before computing naive NSE. This explains the 0.811 vs 0.826 discrepancy.
 
-5. **[MEDIO] Eliminar `delta_flow_5m` y `delta_flow_15m` de `src/features/engineering.py:115-116`** (o al menos marcarlos claramente como "deprecated - backdoor to flow_total"). Ya estan fuera de FEATURE_COLUMNS en iter16 pero siguen generandose.
+5. **[MEDIUM] Remove `delta_flow_5m` and `delta_flow_15m` from `src/features/engineering.py:115-116`** (or at least mark them clearly as "deprecated - backdoor to flow_total"). They are already out of FEATURE_COLUMNS in iter16 but are still generated.
 
-6. **[MEDIO] Fijar un unico criterio de "extremo sin lluvia"** entre `evaluate_local.py:637-642` y `scripts/generate_dataset_stats.py:504-507`. Recalcular ambos outputs bajo el nuevo criterio. Asi la discrepancia 15/59 vs 0/59 se resuelve.
+6. **[MEDIUM] Fix a single criterion for "extreme without rainfall"** between `evaluate_local.py:637-642` and `scripts/generate_dataset_stats.py:504-507`. Recompute both outputs under the new criterion. That resolves the 15/59 vs 0/59 discrepancy.
 
-7. **[BAJO] Eliminar `CompositeLoss` (src/models/loss.py:14-110)** o marcarla como obsoleta para evitar confusion sobre umbrales normalizados vs MGD.
+7. **[LOW] Remove `CompositeLoss` (src/models/loss.py:14-110)** or mark it obsolete to avoid confusion about normalized thresholds vs MGD.
 
-8. **[BAJO] Documentar que las features rolling (`rain_sum_*`, `api_dynamic`, `minutes_since_last_rain`) se calculan antes del split y heredan continuidad de train->val->test**. No es leakage del target pero si una dependencia cruzada que conviene documentar.
+8. **[LOW] Document that rolling features (`rain_sum_*`, `api_dynamic`, `minutes_since_last_rain`) are computed before the split and inherit train->val->test continuity**. It is not target leakage, but it is a cross-dependency worth documenting.
 
-9. **[BAJO] Imprimir los thresholds p95/p99/p999 en MGD reales ademas de en espacio normalizado en `sequences.py:228`** para evitar confusion al leer logs.
+9. **[LOW] Print thresholds p95/p99/p999 in real MGD in addition to normalized space in `sequences.py:228`** to avoid confusion when reading logs.
