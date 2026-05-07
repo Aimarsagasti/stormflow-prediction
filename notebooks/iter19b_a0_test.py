@@ -1,42 +1,42 @@
 # -*- coding: utf-8 -*-
 """iter19b_a0_test.py
 
-Re-evaluacion de A0 (TCN limpia con log1p=True) sobre TEST.
+Re-evaluation of A0 (clean TCN with log1p=True) on TEST.
 
-Objetivo: cerrar la duda metodologica documentada en
+Objective: close the methodological question documented in
 `outputs/diagnostic/iter19_comparison.md` sobre si la regla "max NSE_val" usada
-en iter19 privilegio la metrica global a costa del comportamiento operativo
-en el bucket Extremo. A0 tenia err_pico val = +1.5% (casi perfecto) frente a
+in iter19 privileged the global metric at the expense of operational behavior
+in the Extremo bucket. A0 had val peak_err = +1.5% (almost perfect) versus
 -25% de A1/A4, pero nunca se evaluo en test.
 
-Hipotesis: A0 tendra menor NSE global que A4 pero mejor comportamiento en el
-bucket Extremo (menor bias absoluto, error de pico mas cercano a 0).
+Hypothesis: A0 will have lower global NSE than A4 but better behavior in the
+Extremo bucket (lower absolute bias, peak error closer to 0).
 
-Diseno:
-- Una sola corrida con la config A0 evaluada directamente en TEST
-  (early stopping monitorizando val).
-- Comparacion 1:1 contra A4 cargando los pesos de `outputs/iter19/weights/final.pt`
-  y re-prediciendo sobre el mismo conjunto de test.
+Design:
+- A single run with config A0 evaluated directly on TEST
+  (early stopping monitoring val).
+- One-to-one comparison against A4 by loading the weights from `outputs/iter19/weights/final.pt`
+  and re-predicting on the same test set.
 
-Restricciones (rama iter19-tcn-comparison):
-- No modificar archivos ya commiteados de iter19 (tcn_clean.py, normalize_v2.py,
-  iter19_tcn_clean.py, pesos, JSON, comparison.md).
-- No mergear a main; queda en la rama iter19-tcn-comparison.
+Restrictions (branch iter19-tcn-comparison):
+- Do not modify already committed iter19 files (tcn_clean.py, normalize_v2.py,
+  iter19_tcn_clean.py, weights, JSON, comparison.md).
+- Do not merge to main; it stays on branch iter19-tcn-comparison.
 
-Estructura de celdas estilo Colab (`# %%`).
+Colab-style cell structure (`# %%`).
 
-Ejecucion: Colab Pro T4 (igual que iter19_tcn_clean.py). En CPU es viable
-pero muy lento (~1-2h para una corrida).
+Execution: Colab Pro T4 (same as iter19_tcn_clean.py). On CPU it is feasible
+but very slow (~1-2h for one run).
 """
 
 # %% [markdown]
-# # Iter19b - A0 (con log1p) en TEST vs A4 (sin log1p)
+# # Iter19b - A0 (with log1p) on TEST vs A4 (without log1p)
 #
-# - Reentrena la TCN A0 (L=72, C=32, log1p=True) sobre train, early stopping en val.
-# - Evalua sobre test con `evaluate_full_panel`.
-# - Carga A4 desde `outputs/iter19/weights/final.pt` y predice sobre el mismo test.
-# - Compara A0 vs A4 globalmente y por bucket (foco en Alto+Extremo).
-# - Genera JSON, markdown y scatter doble.
+# - Retrains TCN A0 (L=72, C=32, log1p=True) on train, with early stopping on val.
+# - Evaluates on test with `evaluate_full_panel`.
+# - Loads A4 from `outputs/iter19/weights/final.pt` and predicts on the same test.
+# - Compares A0 vs A4 globally and by bucket (focus on Alto+Extremo).
+# - Generates JSON, markdown, and a double scatter plot.
 
 # %%
 from __future__ import annotations
@@ -60,14 +60,14 @@ REPO_ROOT = next(
 )
 if REPO_ROOT is None:
     raise RuntimeError(
-        "No encuentro REPO_ROOT con src/models/tcn_clean.py. "
-        f"Candidatos probados: {[str(p) for p in CANDIDATE_ROOTS]}. "
-        "En Colab clona el repo en /content/stormflow-prediction antes de ejecutar."
+        "Cannot find REPO_ROOT with src/models/tcn_clean.py. "
+        f"Tested candidates: {[str(p) for p in CANDIDATE_ROOTS]}. "
+        "In Colab, clone the repo into /content/stormflow-prediction before running."
     )
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-# Localizar parquet con features. Mismas rutas candidatas que iter19.
+# Locate the parquet with features. Same candidate paths as iter19.
 CANDIDATE_PARQUETS = [
     REPO_ROOT / "outputs" / "cache" / "df_with_features.parquet",
     Path("/content/drive/MyDrive/Proyecto de capstone/df_with_features.parquet"),
@@ -75,11 +75,11 @@ CANDIDATE_PARQUETS = [
 PARQUET_PATH = next((p for p in CANDIDATE_PARQUETS if p.exists()), None)
 if PARQUET_PATH is None:
     raise RuntimeError(
-        "No encuentro df_with_features.parquet. Verifica con el usuario la ruta "
-        f"correcta. Candidatos probados: {[str(p) for p in CANDIDATE_PARQUETS]}."
+        "Cannot find df_with_features.parquet. Verify with the user the correct "
+        f"path. Tested candidates: {[str(p) for p in CANDIDATE_PARQUETS]}."
     )
 
-# Paths de salida (reutilizan la estructura de iter19).
+# Output paths (reuse the iter19 structure).
 OUT_BASE = REPO_ROOT / "outputs"
 ITER_DIR = OUT_BASE / "iter19"
 WEIGHTS_DIR = ITER_DIR / "weights"
@@ -89,12 +89,12 @@ FIG_DIR = OUT_BASE / "figures" / "iter19"
 for d in [WEIGHTS_DIR, LOGS_DIR, DIAG_DIR, FIG_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
-# Path de los pesos de A4 (final de iter19) para la comparacion.
+# Path to the A4 weights (final from iter19) for the comparison.
 A4_WEIGHTS_PATH = WEIGHTS_DIR / "final.pt"
 if not A4_WEIGHTS_PATH.exists():
     raise RuntimeError(
-        f"No encuentro pesos de A4 en {A4_WEIGHTS_PATH}. "
-        "Necesarios para la comparacion. Asegurate de tener los outputs de iter19 sincronizados."
+        f"Cannot find A4 weights at {A4_WEIGHTS_PATH}. "
+        "They are required for the comparison. Make sure the iter19 outputs are synchronized."
     )
 
 print(f"[iter19b] REPO_ROOT = {REPO_ROOT}")
@@ -130,27 +130,27 @@ torch.manual_seed(SEED)
 np.random.seed(SEED)
 print(f"[iter19b] device={DEVICE}  torch={torch.__version__}")
 if DEVICE.type != "cuda":
-    print("[iter19b] WARNING: GPU no disponible. El entrenamiento sera muy lento. "
-          "Ejecuta este notebook en Colab Pro con T4 para tiempos razonables.")
+    print("[iter19b] WARNING: GPU not available. Training will be very slow. "
+          "Run this notebook in Colab Pro with T4 for reasonable runtimes.")
 
 # %%
-# Constantes globales del experimento (mismas que iter19).
+# Global experiment constants (same as iter19).
 HORIZON = 1
 TCN_FEATURE_COLS = list(FEATURES_10)
 N_INPUT_CHANNELS = 1 + len(TCN_FEATURE_COLS)
-print(f"[iter19b] canales TCN = {N_INPUT_CHANNELS}  (target_hist + {TCN_FEATURE_COLS})")
+print(f"[iter19b] TCN channels = {N_INPUT_CHANNELS}  (target_hist + {TCN_FEATURE_COLS})")
 
 # %%
-# Carga del parquet.
+# Load the parquet.
 t0 = time.time()
 df = pd.read_parquet(PARQUET_PATH)
-print(f"[iter19b] parquet cargado en {time.time() - t0:.1f}s. shape={df.shape}")
+print(f"[iter19b] parquet loaded in {time.time() - t0:.1f}s. shape={df.shape}")
 TOTAL_LEN = len(df)
 print(f"[iter19b] split: train_end={IDX_TRAIN_END}  val_end={IDX_VAL_END}  total={TOTAL_LEN}")
 
 missing = [c for c in [TARGET_COL] + TCN_FEATURE_COLS if c not in df.columns]
 if missing:
-    raise RuntimeError(f"Faltan columnas en parquet: {missing}")
+    raise RuntimeError(f"Missing columns in parquet: {missing}")
 
 # %%
 # Scalers: necesitamos uno con log1p=True (para A0) y otro con log1p=False
@@ -291,10 +291,10 @@ def train_one_run(
     config: dict,
     n_workers: int = 2,
 ) -> dict:
-    """Entrena la TCN con la configuracion dada y evalua en val + test.
+    """Train the TCN with the given configuration and evaluate on val + test.
 
-    Early stopping monitorizando val. Mejores pesos guardados en
-    WEIGHTS_DIR/{run_id}.pt. Devuelve dict con metricas y arrays de prediccion.
+    Early stopping monitors val. Best weights are saved to
+    WEIGHTS_DIR/{run_id}.pt. Returns a dict with metrics and prediction arrays.
     """
     seed = int(config.get("seed", SEED))
     torch.manual_seed(seed)
@@ -447,8 +447,8 @@ def train_one_run(
 
 
 # %%
-# Configuracion A0 (identica a la de iter19, repetida aqui para que el notebook
-# sea autocontenido).
+# A0 configuration (identical to iter19, repeated here so the notebook
+# is self-contained).
 A0_TEST_CONFIG = dict(
     L=72,
     C=32,
@@ -471,8 +471,8 @@ for k, v in A0_TEST_CONFIG.items():
     print(f"  {k} = {v}")
 
 # %%
-# Entrenamiento de A0 sobre train, early stopping en val, evaluacion final en test.
-print("\n[iter19b] === Entrenando A0 (log1p=True) y evaluando en test ===")
+# Train A0 on train, early stopping on val, final evaluation on test.
+print("\n[iter19b] === Training A0 (log1p=True) and evaluating on test ===")
 a0_run = train_one_run("A0_test", A0_TEST_CONFIG)
 
 a0_panel = a0_run["test_panel"]
@@ -480,8 +480,8 @@ print(f"\n[iter19b] A0 test NSE = {a0_panel['global']['nse']:.4f}  "
       f"err_pico = {a0_panel['global']['peak_err_pct']:+.1f}%")
 
 # %%
-# Cargar A4 desde final.pt y predecir sobre test (con scaler log1p=False).
-print(f"\n[iter19b] === Cargando A4 desde {A4_WEIGHTS_PATH} y prediciendo en test ===")
+# Load A4 from final.pt and predict on test (with scaler log1p=False).
+print(f"\n[iter19b] === Loading A4 from {A4_WEIGHTS_PATH} and predicting on test ===")
 a4_ckpt = torch.load(A4_WEIGHTS_PATH, map_location=DEVICE)
 a4_config = dict(a4_ckpt["config"])
 print(f"[iter19b] A4 config (del checkpoint): "
@@ -518,7 +518,7 @@ a4_panel = evaluate_full_panel(yt_a4_mgd, yp_a4_mgd, timestamps=a4_test_timestam
 print(f"[iter19b] A4 test NSE (recomputado) = {a4_panel['global']['nse']:.4f}  "
       f"err_pico = {a4_panel['global']['peak_err_pct']:+.1f}%  n={a4_panel['global']['n']}")
 
-# Sanity check: el NSE recomputado debe coincidir con el JSON oficial de iter19
+# Sanity check: the recomputed NSE must match the official iter19 JSON
 # (NSE_A4_test = 0.8983).
 NSE_A4_OFFICIAL = 0.8983
 delta_nse_check = abs(a4_panel["global"]["nse"] - NSE_A4_OFFICIAL)
@@ -529,7 +529,7 @@ else:
     print(f"[iter19b] sanity OK: |NSE_A4_recomputado - NSE_A4_oficial| = {delta_nse_check:.4f} <= 0.01")
 
 # %%
-# Construir comparacion A0 vs A4 por bucket y global.
+# Build the A0 vs A4 comparison by bucket and globally.
 def deltas_global(p_a0: dict, p_a4: dict) -> dict:
     g0 = p_a0["global"]
     g4 = p_a4["global"]

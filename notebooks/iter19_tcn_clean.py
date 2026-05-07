@@ -1,42 +1,42 @@
 # -*- coding: utf-8 -*-
 """iter19_tcn_clean.py
 
-Notebook orquestador de iter19 (rama `iter19-tcn-comparison`).
+Iter19 orchestrator notebook (branch `iter19-tcn-comparison`).
 
-Implementa la TCN estandar (Bai et al. 2018) descrita en `outputs/diagnostic/
-DIAGNOSTIC_REPORT.md` §7.6. Una sola corrida final sobre test, precedida por
-una mini-ablacion en val (4 configuraciones) para fijar log1p, L y C.
+Implements the standard TCN (Bai et al. 2018) described in `outputs/diagnostic/
+DIAGNOSTIC_REPORT.md` §7.6. A single final run on test, preceded by
+a mini-ablation on val (4 configurations) to set log1p, L, and C.
 
-Spec completa: rama `iter19-tcn-comparison`, archivo de prompt original.
+Full spec: branch `iter19-tcn-comparison`, original prompt file.
 
-Diseno:
-- Sin two-stage, sin clasificador, sin switch duro.
-- Loss Huber simple en espacio normalizado.
-- Inputs (B, T, F): 1 canal target historico + 10 features de S5 = 11 canales.
-- Origins de las ventanas: `aligned_indices` de iter17 (con seq_length=L del
-  experimento) para garantizar que las ventanas no cruzan la frontera de splits.
-  Para L=72 los indices coinciden 1:1 con `xgb_lag6_feat10` (n_test=165222).
+Design:
+- No two-stage, no classifier, no hard switch.
+- Simple Huber loss in normalized space.
+- Inputs (B, T, F): 1 historical target channel + 10 S5 features = 11 channels.
+- Window origins: `aligned_indices` from iter17 (with the experiment's seq_length=L)
+  to guarantee that windows do not cross the split boundary.
+  For L=72 the indices match `xgb_lag6_feat10` 1:1 (n_test=165222).
 
-Estructura de celdas estilo Colab (`# %%`).
+Colab-style cell structure (`# %%`).
 
-Ejecucion:
-- Local (Windows / VS Code): `python notebooks/iter19_tcn_clean.py` o ejecutar
+Execution:
+- Local (Windows / VS Code): `python notebooks/iter19_tcn_clean.py` or run
   celda a celda. Funciona en CPU pero es muy lento — usar Colab T4.
-- Colab Pro con T4 GPU: clonar el repo en /content/stormflow-prediction y
-  posicionar el cwd ahi. Verificar con el usuario la ruta del parquet
-  (puede estar en cache local del repo o en Drive).
+- Colab Pro with T4 GPU: clone the repo into /content/stormflow-prediction and
+  set the cwd there. Verify with the user the parquet path
+  (it may be in the repo local cache or in Drive).
 """
 
 # %% [markdown]
-# # Iter19 - TCN limpia (Bai 2018) vs xgb_lag6_feat10
+# # Iter19 - Clean TCN (Bai 2018) vs xgb_lag6_feat10
 #
-# - Mini-ablacion en val: A0 (baseline), A1 (sin log1p), A2 (L=144), A3 (C=64).
-# - Seleccion ganadora asumiendo independencia de factores; corrida extra A4
-#   si la combinacion ganadora no coincide con ninguna A0..A3 ya entrenada.
-# - Corrida final sobre test con la config ganadora; comparacion contra
-#   `xgb_lag6_feat10` (NSE H=1 = 0.8630, cifra oficial iter17).
-# - Veredicto: si `NSE_TCN - NSE_XGB >= 0.02` -> TCN gana; si no, deep
-#   learning se cierra para el TFM.
+# - Mini-ablation on val: A0 (baseline), A1 (without log1p), A2 (L=144), A3 (C=64).
+# - Winning selection assuming factor independence; extra run A4
+#   if the winning combination does not match any already trained A0..A3.
+# - Final run on test with the winning config; comparison against
+#   `xgb_lag6_feat10` (NSE H=1 = 0.8630, official iter17 figure).
+# - Verdict: if `NSE_TCN - NSE_XGB >= 0.02` -> TCN wins; otherwise, deep
+#   learning is closed for the TFM.
 
 # %%
 from __future__ import annotations
@@ -60,14 +60,14 @@ REPO_ROOT = next(
 )
 if REPO_ROOT is None:
     raise RuntimeError(
-        "No encuentro REPO_ROOT con src/models/tcn_clean.py. "
-        f"Candidatos probados: {[str(p) for p in CANDIDATE_ROOTS]}. "
-        "En Colab clona el repo en /content/stormflow-prediction antes de ejecutar."
+        "Cannot find REPO_ROOT with src/models/tcn_clean.py. "
+        f"Tested candidates: {[str(p) for p in CANDIDATE_ROOTS]}. "
+        "In Colab, clone the repo into /content/stormflow-prediction before running."
     )
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-# Localizar parquet con features. Confirma con el usuario si ninguno aplica.
+# Locate the parquet with features. Confirm with the user if none applies.
 CANDIDATE_PARQUETS = [
     REPO_ROOT / "outputs" / "cache" / "df_with_features.parquet",
     Path("/content/drive/MyDrive/Proyecto de capstone/df_with_features.parquet"),
@@ -75,11 +75,11 @@ CANDIDATE_PARQUETS = [
 PARQUET_PATH = next((p for p in CANDIDATE_PARQUETS if p.exists()), None)
 if PARQUET_PATH is None:
     raise RuntimeError(
-        "No encuentro df_with_features.parquet. Verifica con el usuario la ruta "
-        f"correcta. Candidatos probados: {[str(p) for p in CANDIDATE_PARQUETS]}."
+        "Cannot find df_with_features.parquet. Verify with the user the correct "
+        f"path. Tested candidates: {[str(p) for p in CANDIDATE_PARQUETS]}."
     )
 
-# Paths de salida.
+# Output paths.
 OUT_BASE = REPO_ROOT / "outputs"
 ITER_DIR = OUT_BASE / "iter19"
 WEIGHTS_DIR = ITER_DIR / "weights"
@@ -124,31 +124,31 @@ torch.manual_seed(SEED)
 np.random.seed(SEED)
 print(f"[iter19] device={DEVICE}  torch={torch.__version__}")
 if DEVICE.type != "cuda":
-    print("[iter19] WARNING: GPU no disponible. El entrenamiento sera muy lento. "
-          "Ejecuta este notebook en Colab Pro con T4 para tiempos razonables.")
+    print("[iter19] WARNING: GPU not available. Training will be very slow. "
+          "Run this notebook in Colab Pro with T4 for reasonable runtimes.")
 
 # %%
-# Constantes globales del experimento.
+# Global constants of the experiment.
 HORIZON = 1
 TCN_FEATURE_COLS = list(FEATURES_10)              # 10 features (no incluye target)
 N_INPUT_CHANNELS = 1 + len(TCN_FEATURE_COLS)      # 1 (target hist) + 10 features = 11
-print(f"[iter19] canales TCN = {N_INPUT_CHANNELS}  (target_hist + {TCN_FEATURE_COLS})")
+print(f"[iter19] TCN channels = {N_INPUT_CHANNELS}  (target_hist + {TCN_FEATURE_COLS})")
 
 # %%
-# Carga del parquet.
+# Load the parquet.
 t0 = time.time()
 df = pd.read_parquet(PARQUET_PATH)
-print(f"[iter19] parquet cargado en {time.time() - t0:.1f}s. shape={df.shape}")
+print(f"[iter19] parquet loaded in {time.time() - t0:.1f}s. shape={df.shape}")
 TOTAL_LEN = len(df)
 print(f"[iter19] split: train_end={IDX_TRAIN_END}  val_end={IDX_VAL_END}  total={TOTAL_LEN}")
 
 missing = [c for c in [TARGET_COL] + TCN_FEATURE_COLS if c not in df.columns]
 if missing:
-    raise RuntimeError(f"Faltan columnas en parquet: {missing}")
+    raise RuntimeError(f"Missing columns in parquet: {missing}")
 
 # %%
 # Scalers (uno con log1p_target=True, otro con False) — se reutilizan en cada run
-# segun la configuracion de la ablacion.
+# according to the ablation configuration.
 df_train = df.iloc[:IDX_TRAIN_END]
 
 
@@ -198,7 +198,7 @@ print(f"[iter19] arrays normalizados shape = {ARRAYS[True][0].shape}")
 
 # %%
 # Origins por L. Reusa aligned_indices de iter17 con seq_length=L para que las
-# ventanas no crucen frontera de splits. Para L=72 coincide 1:1 con la convencion
+# windows do not cross split boundaries. For L=72 it matches 1:1 with the convention
 # de `xgb_lag6_feat10` (n_test = 165,222 a H=1).
 
 def origins_for_L(L: int) -> dict:
@@ -268,7 +268,7 @@ def predict_loader(model: nn.Module, loader: DataLoader, device: torch.device) -
 
 
 # %%
-# Entrenamiento de una corrida.
+# Train one run.
 
 def _make_loader(ds: Dataset, batch_size: int, shuffle: bool, n_workers: int) -> DataLoader:
     use_workers = n_workers if (n_workers > 0 and DEVICE.type == "cuda") else 0
@@ -286,20 +286,20 @@ def _make_loader(ds: Dataset, batch_size: int, shuffle: bool, n_workers: int) ->
 def train_one_run(
     run_id: str,
     config: dict,
-    eval_split: str = "val",   # "val" en ablacion; "test" en corrida final
+    eval_split: str = "val",   # "val" in ablation; "test" in final run
     n_workers: int = 2,
 ) -> dict:
-    """Entrena la TCN con la configuracion dada.
+    """Train the TCN with the given configuration.
 
     Args:
-        run_id: identificador (se usa como nombre de fichero de pesos y log).
-        config: dict con todos los hiperparametros (ver BASELINE).
-        eval_split: "val" -> early stopping y panel sobre val.
-                    "test" -> early stopping sobre val + panel tambien sobre test.
-        n_workers: workers del DataLoader.
+        run_id: identifier (used as the weights and log filename).
+        config: dict with all hyperparameters (see BASELINE).
+        eval_split: "val" -> early stopping and panel on val.
+                    "test" -> early stopping on val + panel also on test.
+        n_workers: DataLoader workers.
 
     Returns:
-        Dict con metricas, paneles y arrays de prediccion.
+        Dict with metrics, panels, and prediction arrays.
     """
     seed = int(config.get("seed", SEED))
     torch.manual_seed(seed)
@@ -422,11 +422,11 @@ def train_one_run(
         f"train_seconds={train_seconds:.1f}"
     )
 
-    # Cargar mejores pesos para evaluacion final.
+    # Load best weights for final evaluation.
     ckpt = torch.load(weights_path, map_location=DEVICE)
     model.load_state_dict(ckpt["model_state_dict"])
 
-    # Panel val (siempre).
+    # Val panel (always).
     y_pred_val, y_true_val = predict_loader(model, val_loader, DEVICE)
     yp_val_mgd = inverse_transform_target(y_pred_val, scaler)
     yt_val_mgd = inverse_transform_target(y_true_val, scaler)
@@ -434,7 +434,7 @@ def train_one_run(
     val_timestamps = df.iloc[val_origins + HORIZON]["timestamp"].reset_index(drop=True)
     val_panel = evaluate_full_panel(yt_val_mgd, yp_val_mgd, timestamps=val_timestamps)
 
-    # Panel test (solo en corrida final).
+    # Test panel (only in the final run).
     test_panel = None
     test_y_pred_mgd = None
     test_y_true_mgd = None
@@ -449,7 +449,7 @@ def train_one_run(
             test_y_true_mgd, test_y_pred_mgd, timestamps=test_timestamps
         )
 
-    # Persistir log.
+    # Persist log.
     with open(log_path, "w", encoding="utf-8") as f:
         f.write("\n".join(train_log_lines) + "\n")
 
@@ -477,7 +477,7 @@ def train_one_run(
 
 
 # %%
-# Configuracion baseline + 4 variantes de ablacion (spec §"Mini-ablacion en VAL").
+# Baseline configuration + 4 ablation variants (spec §"Mini-ablation on VAL").
 BASELINE = dict(
     L=72,
     C=32,
@@ -502,21 +502,21 @@ ABLATIONS = {
     "A3": {**BASELINE, "C": 64},
 }
 
-print("[iter19] ablacion configurada:")
+print("[iter19] configured ablation:")
 for k, v in ABLATIONS.items():
     print(f"  {k}: L={v['L']} C={v['C']} log1p={v['log1p_target']}")
 
 # %%
-# Loop de ablacion en val.
+# Val ablation loop.
 ablation_runs: dict = {}
 for run_id, cfg in ABLATIONS.items():
-    print(f"\n[iter19] === Ejecutando ablacion {run_id} ===")
+    print(f"\n[iter19] === Running ablation {run_id} ===")
     print(f"[iter19]   {cfg}")
     ablation_runs[run_id] = train_one_run(run_id, cfg, eval_split="val")
 
 # %%
-# Tabla resumen de la ablacion.
-print("\n[iter19] === Resumen ablacion (val) ===")
+# Summary table of the ablation.
+print("\n[iter19] === Ablation summary (val) ===")
 print(f"{'run':<4} {'L':>4} {'C':>4} {'log1p':>6} {'NSE':>8} {'RMSE':>7} "
       f"{'pico%':>7} {'rec@50':>7} {'epoch':>6} {'sec':>6}")
 for rid, r in ablation_runs.items():
@@ -530,13 +530,13 @@ for rid, r in ablation_runs.items():
           f"{rec50_str:>7} {r['best_epoch']:>6} {r['train_seconds']:>6.0f}")
 
 # %%
-# Seleccion ganadora (independencia de factores).
+# Winner selection (factor independence).
 
 def pick_winner(ablation_runs: dict) -> dict:
-    """Elige config ganadora asumiendo que log1p, L y C son independientes.
+    """Choose the winning config assuming that log1p, L, and C are independent.
 
-    Para cada eje compara A0 contra la variante que cambia ese eje y se queda
-    con el valor de mayor NSE_val.
+    For each axis, compare A0 against the variant that changes that axis and keep
+    the value with the higher NSE_val.
     """
     nse = {rid: ablation_runs[rid]["val_panel"]["global"]["nse"] for rid in ablation_runs}
     a0 = ablation_runs["A0"]["config"]
@@ -571,7 +571,7 @@ print(f"\n[iter19] winner: log1p={winner['log1p_win']} "
       f"L={winner['L_win']} C={winner['C_win']} matched={winner['matched']}")
 
 if winner["matched"] is None:
-    print(f"[iter19] La combinacion ganadora no coincide con A0..A3. Entrenando A4...")
+    print(f"[iter19] The winning combination does not match A0..A3. Training A4...")
     ablation_runs["A4"] = train_one_run("A4", winner["config"], eval_split="val")
     p_a4 = ablation_runs["A4"]["val_panel"]
     print(f"[A4] NSE_val = {p_a4['global']['nse']:.4f}")
@@ -583,10 +583,10 @@ else:
     print(f"[iter19] winner ya entrenado como {winner_run_id}")
 
 # %%
-# Corrida final en TEST con la config ganadora. Entrena solo en train,
-# early stopping monitorizando val, evalua en test (alternativa simple
-# del spec, mas comparable a iter17).
-print(f"\n[iter19] === Corrida final en test con config ganadora ({winner_run_id}) ===")
+# Final run on TEST with the winning config. Train only on train,
+# monitor val with early stopping, evaluate on test (simple alternative
+# from the spec, more comparable to iter17).
+print(f"\n[iter19] === Final run on test with winning config ({winner_run_id}) ===")
 final_run = train_one_run("final", winner_cfg, eval_split="test")
 final_panel = final_run["test_panel"]
 TCN_NSE_FINAL = float(final_panel["global"]["nse"])
@@ -595,7 +595,7 @@ print(f"\n[iter19] FINAL TEST NSE = {TCN_NSE_FINAL:.4f}")
 # %%
 # Re-entrenar xgb_lag6_feat10 inline para tener predicciones sobre los mismos
 # indices y poder comparar 1:1 (mismo n_test cuando L=72; recortado cuando L=144).
-print("\n[iter19] === Re-entrenando xgb_lag6_feat10 para comparacion directa ===")
+print("\n[iter19] === Retraining xgb_lag6_feat10 for direct comparison ===")
 xgb_out = train_xgboost_h(
     df,
     horizon=HORIZON,
@@ -605,7 +605,7 @@ xgb_out = train_xgboost_h(
     include_features=True,
     xgb_params=DEFAULT_XGB_PARAMS,
     early_stopping_rounds=DEFAULT_EARLY_STOPPING_ROUNDS,
-    seq_length=72,           # convencion oficial iter17
+    seq_length=72,           # official iter17 convention
     verbose=False,
 )
 xgb_y_true_72 = xgb_out["y_true_test"]
@@ -627,10 +627,10 @@ else:
     xgb_ts = xgb_ts_72
 
 xgb_panel = evaluate_full_panel(xgb_y_true, xgb_y_pred, timestamps=xgb_ts)
-print(f"[iter19] xgb_lag6_feat10 (alineado): NSE={xgb_panel['global']['nse']:.4f}")
+print(f"[iter19] xgb_lag6_feat10 (aligned): NSE={xgb_panel['global']['nse']:.4f}")
 
 # %%
-# Veredicto.
+# Verdict.
 XGB_NSE_REF_ITER17 = 0.8630   # cifra oficial de iter17 (n=165222)
 XGB_NSE_INLINE = float(xgb_panel["global"]["nse"])
 DELTA_NSE = TCN_NSE_FINAL - XGB_NSE_REF_ITER17
@@ -640,7 +640,7 @@ VERDICT = "TCN_WINS" if DELTA_NSE >= THRESHOLD else "XGB_WINS"
 print("\n[iter19] === VEREDICTO ===")
 print(f"NSE TCN (test, H=1)            = {TCN_NSE_FINAL:.4f}")
 print(f"NSE XGB iter17 (referencia)    = {XGB_NSE_REF_ITER17:.4f}")
-print(f"NSE XGB inline (alineado)      = {XGB_NSE_INLINE:.4f}")
+print(f"NSE XGB inline (aligned)       = {XGB_NSE_INLINE:.4f}")
 print(f"delta NSE (TCN - XGB iter17)   = {DELTA_NSE:+.4f}")
 print(f"umbral de cierre               = +{THRESHOLD:.3f}")
 print(f"VEREDICTO                      = {VERDICT}")
@@ -761,10 +761,10 @@ def fmt(v, spec=".4f"):
 lines: list = []
 lines.append("# Iter19 - TCN limpia (Bai 2018) vs xgb_lag6_feat10\n")
 
-# 1. Resumen ejecutivo
-lines.append("## Resumen ejecutivo\n")
+# 1. Executive summary
+lines.append("## Executive summary\n")
 lines.append(
-    f"Configuracion ganadora: **{winner_run_id}** "
+    f"Winning configuration: **{winner_run_id}** "
     f"(L={winner_cfg['L']}, C={winner_cfg['C']}, log1p_target={winner_cfg['log1p_target']}). "
     f"NSE TCN test H=1 = **{TCN_NSE_FINAL:.4f}**. "
     f"NSE XGB iter17 referencia = {XGB_NSE_REF_ITER17:.4f}. "
@@ -772,8 +772,8 @@ lines.append(
     f"VEREDICTO: **{VERDICT}**.\n"
 )
 
-# 2. Tabla ablacion val
-lines.append("## Tabla de ablacion en val\n")
+# 2. Val ablation table
+lines.append("## Table of val ablation\n")
 lines.append("| Run | L | C | log1p | NSE_val | RMSE_val | err_pico_val (%) | recall@50_val | best_epoch | train_s |")
 lines.append("|---|---:|---:|:---:|---:|---:|---:|---:|---:|---:|")
 for rid, r in ablation_runs.items():
@@ -782,7 +782,7 @@ for rid, r in ablation_runs.items():
     rec50 = p["recall"]["at_50_mgd"].get("recall")
     lines.append(
         f"| {rid} | {r['config']['L']} | {r['config']['C']} | "
-        f"{'sí' if r['config']['log1p_target'] else 'no'} | "
+        f"{'yes' if r['config']['log1p_target'] else 'no'} | "
         f"{fmt(g['nse'])} | {fmt(g['rmse'], '.3f')} | "
         f"{fmt(g['peak_err_pct'], '+.1f')} | "
         f"{fmt(rec50, '.3f')} | "
@@ -790,8 +790,8 @@ for rid, r in ablation_runs.items():
     )
 lines.append("")
 
-# 3. Justificacion de la config ganadora
-lines.append("## Justificacion de la config ganadora\n")
+# 3. Justification of the winning configuration
+lines.append("## Justification of the winning configuration\n")
 nse_a0 = ablation_runs["A0"]["val_panel"]["global"]["nse"]
 nse_a1 = ablation_runs["A1"]["val_panel"]["global"]["nse"]
 nse_a2 = ablation_runs["A2"]["val_panel"]["global"]["nse"]
@@ -815,7 +815,7 @@ if winner["matched"] is None:
     )
 else:
     lines.append(
-        f"La combinacion ganadora coincide con la corrida {winner['matched']} ya entrenada en la ablacion.\n"
+        f"The winning combination matches run {winner['matched']} already trained in the ablation.\n"
     )
 
 # 4. Resultados del modelo final en test
@@ -849,8 +849,8 @@ for bname in [b[0] for b in DEFAULT_BUCKETS]:
     )
 lines.append("")
 
-# 5. Comparacion contra xgb_lag6_feat10
-lines.append("## Comparacion directa contra xgb_lag6_feat10\n")
+# 5. Comparison against xgb_lag6_feat10
+lines.append("## Direct comparison against xgb_lag6_feat10\n")
 lines.append("Ambos modelos evaluados sobre los mismos timestamps de test "
              f"(L_winner={L_winner}, offset XGB={offset_xgb} pasos).\n")
 xgb_g = xgb_panel["global"]
@@ -894,15 +894,15 @@ lines.append(
 lines.append("")
 lines.append(f"NSE de referencia oficial iter17 (xgb_lag6_feat10, n=165222): **{XGB_NSE_REF_ITER17:.4f}**.")
 lines.append(f"Delta usado para el veredicto: TCN({TCN_NSE_FINAL:.4f}) - XGB_iter17({XGB_NSE_REF_ITER17:.4f}) = **{DELTA_NSE:+.4f}**.")
-lines.append(f"Umbral de cierre del DIAGNOSTIC_REPORT §7.6: +{THRESHOLD:.3f}.\n")
+lines.append(f"Threshold from DIAGNOSTIC_REPORT §7.6: +{THRESHOLD:.3f}.\n")
 
-# 6. Veredicto
-lines.append("## Veredicto\n")
+# 6. Verdict
+lines.append("## Verdict\n")
 if VERDICT == "TCN_WINS":
     lines.append(
         f"**TCN gana** por margen >= {THRESHOLD:.3f} NSE. La TCN limpia (Bai 2018) supera al "
-        f"regresor XGBoost por {DELTA_NSE:+.4f} NSE en H=1. Pasa a ser el modelo principal "
-        f"candidato para el TFM. Pendiente replicar a H=3 en una sesion posterior antes de "
+        f"XGBoost regressor by {DELTA_NSE:+.4f} NSE at H=1. It becomes the main candidate "
+        f"model for the TFM. Replication at H=3 remains pending in a later session before "
         f"sustituir definitivamente a `xgb_lag6_feat10`.\n"
     )
 else:
@@ -910,18 +910,18 @@ else:
         f"**XGBoost gana** (TCN no supera el umbral +{THRESHOLD:.3f} NSE). La diferencia es "
         f"{DELTA_NSE:+.4f} NSE en H=1, dentro del margen de no significancia operativa fijado "
         f"por la spec. Deep learning se cierra para el TFM y `xgb_lag6_feat10` queda como "
-        f"modelo principal definitivo. Esto valida cuantitativamente la hipotesis del "
+        f"definitive main model. This quantitatively validates the hypothesis from "
         f"DIAGNOSTIC_REPORT §6: un GBM con 6 lags + 10 features captura toda la senal "
         f"predictible disponible a H=1 sobre MC-CL-005, y la flexibilidad temporal extra de "
         f"la TCN (receptive field 61 pasos) no aporta valor sobre la senal autoregresiva "
         f"corta del sistema (lag optimo 10 min).\n"
     )
 
-# 7. Lectura honesta para el TFM
-lines.append("## Lectura honesta para el TFM\n")
+# 7. Honest reading for the TFM
+lines.append("## Honest reading for the TFM\n")
 lines.append(
     "Esta es la unica iteracion de deep learning post-diagnostico, intencionalmente limitada "
-    "(una seed, ablacion de 4 corridas, Huber loss simple) para evitar sobre-ingenieria que "
+    "(one seed, 4-run ablation, simple Huber loss) to avoid over-engineering that "
     f"enmascare el resultado real. El umbral de cierre +{THRESHOLD:.3f} NSE es arbitrario pero "
     "defendible: del orden del ruido entre configuraciones razonables, y muy por debajo del "
     "techo fisico H=1 ~0.86 derivado del analisis S4. "
@@ -943,8 +943,8 @@ else:
         "(modelo aparente -> diagnostico -> modelo real mas simple).\n"
     )
 
-# 8. Limitaciones
-lines.append("## Limitaciones reconocidas\n")
+# 8. Limitations
+lines.append("## Recognized limitations\n")
 lines.append(
     "- Una sola seed (=42). No se reportan barras de error sobre la NSE final.\n"
     "- Ablacion minima (4 corridas) con seleccion por independencia de factores. "
@@ -952,10 +952,10 @@ lines.append(
     "- Loss Huber simple en espacio normalizado, sin componente de magnitud ni peak penalty. "
     "Variantes con loss asimetrica podrian mejorar el bucket Extremo, pero quedan fuera de "
     "scope por la spec.\n"
-    f"- Cuando L>72 los origins de val/test se recortan en {offset_xgb} pasos para no cruzar "
-    "frontera de splits. Esto cambia ligeramente n_test respecto a iter17 (n=165222 con L=72).\n"
+    f"- When L>72, val/test origins are trimmed by {offset_xgb} steps to avoid crossing "
+    "split boundaries. This changes n_test slightly relative to iter17 (n=165222 with L=72).\n"
     "- No se ha replicado a H=3 en esta iteracion. Si TCN gana, queda pendiente esa replica "
-    "antes de cambiar el modelo principal en STATE.md y EXPERIMENTS.md.\n"
+    "before changing the main model in STATE.md and EXPERIMENTS.md.\n"
 )
 
 with open(md_path, "w", encoding="utf-8") as f:
@@ -968,7 +968,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# Fig 1 — barras NSE val ablacion.
+# Fig 1 - val ablation NSE bars.
 rids = list(ablation_runs.keys())
 nses = [ablation_runs[r]["val_panel"]["global"]["nse"] for r in rids]
 fig, ax = plt.subplots(figsize=(7.0, 4.0))
@@ -982,7 +982,7 @@ for b, v in zip(bars, nses):
         ha="center", va="bottom", fontsize=9,
     )
 ax.set_ylabel("NSE val (MGD)")
-ax.set_title("iter19 - ablacion en val: NSE por configuracion (verde=ganadora)")
+ax.set_title("iter19 - val ablation: NSE by configuration (green=winner)")
 ax.grid(alpha=0.3, axis="y")
 if max(nses) - min(nses) > 0:
     ax.set_ylim(min(nses) - (max(nses) - min(nses)) * 0.4, max(nses) + (max(nses) - min(nses)) * 0.2)
@@ -1013,12 +1013,12 @@ ax.plot(ts_test.iloc[i0:i1], yp_test[i0:i1], color="#d62728", linewidth=1.4, alp
         label=f"TCN ({winner_run_id})")
 ax.plot(xgb_ts_dt.iloc[xi0:xi1], xgb_y_pred[xi0:xi1], color="#ff7f0e", linewidth=1.2,
         linestyle="--", alpha=0.9, label="XGB lag6+feat10")
-ax.axhline(50.0, linestyle=":", color="#888", linewidth=0.8, label="Umbral Extremo 50 MGD")
+ax.axhline(50.0, linestyle=":", color="#888", linewidth=0.8, label="Extremo Threshold 50 MGD")
 ax.set_title(
-    f"Hidrograma evento extremo de test (H=1) - TCN {winner_run_id} vs XGB\n"
-    f"Pico real = {yt_test[i_peak_tcn]:.1f} MGD a {peak_ts}"
+    f"Test extreme-event hydrograph (H=1) - TCN {winner_run_id} vs XGB\n"
+    f"Real peak = {yt_test[i_peak_tcn]:.1f} MGD at {peak_ts}"
 )
-ax.set_xlabel("Fecha")
+ax.set_xlabel("Date")
 ax.set_ylabel("stormflow (MGD)")
 ax.grid(alpha=0.3)
 ax.legend(loc="upper right")
@@ -1059,7 +1059,7 @@ fig.savefig(FIG_DIR / "scatter_real_vs_pred_H1.png", dpi=140, bbox_inches="tight
 plt.close(fig)
 print(f"[iter19] figura: scatter_real_vs_pred_H1.png")
 
-# Fig 4 — curvas train loss y val NSE de la corrida final.
+# Fig 4 - train loss and val NSE curves of the final run.
 epochs_x = list(range(1, len(final_run["train_loss_history"]) + 1))
 fig, ax1 = plt.subplots(figsize=(8.5, 4.2))
 l1 = ax1.plot(epochs_x, final_run["train_loss_history"], color="#1f77b4", label="train Huber loss")
@@ -1073,7 +1073,7 @@ ax2.tick_params(axis="y", labelcolor="#d62728")
 ax2.axvline(final_run["best_epoch"], color="black", linestyle=":", linewidth=0.8)
 ax2.text(final_run["best_epoch"], max(final_run["val_nse_history"]),
          f" best_epoch={final_run['best_epoch']}", fontsize=9, va="top")
-fig.suptitle(f"iter19 corrida final ({winner_run_id}) — curvas de entrenamiento")
+fig.suptitle(f"iter19 final run ({winner_run_id}) - training curves")
 ax1.grid(alpha=0.3)
 fig.tight_layout()
 fig.savefig(FIG_DIR / "loss_curves_final.png", dpi=140, bbox_inches="tight")
@@ -1081,7 +1081,7 @@ plt.close(fig)
 print(f"[iter19] figura: loss_curves_final.png")
 
 # %%
-# Resumen final en consola.
+# Final summary in console.
 print("\n" + "=" * 80)
 print("iter19 - resumen final")
 print("=" * 80)

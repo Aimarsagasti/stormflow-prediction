@@ -1,37 +1,37 @@
 # -*- coding: utf-8 -*-
 """iter19c_a0_h3.py
 
-Replica de la TCN A0 (con log1p=True) a horizonte H=3.
+Replication of TCN A0 (with log1p=True) at horizon H=3.
 
-Objetivo: cerrar el pendiente del HANDOFF_2026-04-29.md §4 que dice "Si TCN gana
-en H=1, queda pendiente esa replica a H=3 antes de cambiar el modelo principal
-en STATE.md y EXPERIMENTS.md". El usuario ya decidio (post-iter19b) que A0 es
-el modelo principal del TFM. Esta corrida verifica que la decision se mantiene
-a H=3 frente a XGBoost iter17 (NSE_H3_oficial = 0.6871).
+Objective: close the pending item from HANDOFF_2026-04-29.md §4 that says "If TCN wins
+at H=1, that replication at H=3 remains pending before changing the main model
+in STATE.md and EXPERIMENTS.md". The user has already decided (post-iter19b) that A0 is
+the main model of the TFM. This run verifies that the decision still holds
+at H=3 against iter17 XGBoost (NSE_H3_official = 0.6871).
 
-Diseno:
-- Una sola corrida con la config A0 (L=72, C=32, log1p=True) pero horizon=3.
-- Early stopping monitorizando NSE en val.
-- Comparacion 1:1 contra XGB iter17 reentrenado inline a H=3 sobre los mismos
-  timestamps, con sanity check contra la cifra oficial 0.6871.
+Design:
+- A single run with config A0 (L=72, C=32, log1p=True) but horizon=3.
+- Early stopping monitoring NSE on val.
+- One-to-one comparison against iter17 XGB retrained inline at H=3 on the same
+  timestamps, with a sanity check against the official 0.6871 figure.
 
-Restricciones (rama iter19-tcn-comparison):
-- No modificar archivos commiteados de iter19/iter19b.
-- No mergear a main; queda en la rama iter19-tcn-comparison.
+Restrictions (branch iter19-tcn-comparison):
+- Do not modify committed files from iter19/iter19b.
+- Do not merge to main; it stays on branch iter19-tcn-comparison.
 
-Estructura de celdas estilo Colab (`# %%`).
+Colab-style cell structure (`# %%`).
 
-Ejecucion: Colab Pro T4 (~20-30 min).
+Execution: Colab Pro T4 (~20-30 min).
 """
 
 # %% [markdown]
-# # Iter19c - TCN A0 (log1p=True) a H=3 vs XGB iter17 H=3
+# # Iter19c - TCN A0 (log1p=True) at H=3 vs iter17 XGB H=3
 #
-# - Reentrena la TCN A0 (L=72, C=32, log1p=True) con horizon=3 sobre train,
-#   early stopping en val.
-# - Evalua sobre test con `evaluate_full_panel`.
-# - Reentrena XGB iter17 inline a H=3 para cifras alineadas + sanity check vs 0.6871.
-# - Veredicto: TCN_WINS si (NSE_TCN_H3 - 0.6871) >= 0.02; XGB_WINS si no.
+# - Retrains TCN A0 (L=72, C=32, log1p=True) with horizon=3 on train,
+#   with early stopping on val.
+# - Evaluates on test with `evaluate_full_panel`.
+# - Retrains iter17 XGB inline at H=3 for aligned figures + sanity check vs 0.6871.
+# - Verdict: TCN_WINS if (NSE_TCN_H3 - 0.6871) >= 0.02; otherwise XGB_WINS.
 
 # %%
 from __future__ import annotations
@@ -55,14 +55,14 @@ REPO_ROOT = next(
 )
 if REPO_ROOT is None:
     raise RuntimeError(
-        "No encuentro REPO_ROOT con src/models/tcn_clean.py. "
-        f"Candidatos probados: {[str(p) for p in CANDIDATE_ROOTS]}. "
-        "En Colab clona el repo en /content/stormflow-prediction antes de ejecutar."
+        "Cannot find REPO_ROOT with src/models/tcn_clean.py. "
+        f"Tested candidates: {[str(p) for p in CANDIDATE_ROOTS]}. "
+        "In Colab, clone the repo into /content/stormflow-prediction before running."
     )
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-# Localizar parquet con features. Mismas rutas candidatas que iter19/iter19b.
+# Locate the parquet with features. Same candidate paths as iter19/iter19b.
 CANDIDATE_PARQUETS = [
     REPO_ROOT / "outputs" / "cache" / "df_with_features.parquet",
     Path("/content/drive/MyDrive/Proyecto de capstone/df_with_features.parquet"),
@@ -70,11 +70,11 @@ CANDIDATE_PARQUETS = [
 PARQUET_PATH = next((p for p in CANDIDATE_PARQUETS if p.exists()), None)
 if PARQUET_PATH is None:
     raise RuntimeError(
-        "No encuentro df_with_features.parquet. Verifica con el usuario la ruta "
-        f"correcta. Candidatos probados: {[str(p) for p in CANDIDATE_PARQUETS]}."
+        "Cannot find df_with_features.parquet. Verify with the user the correct "
+        f"path. Tested candidates: {[str(p) for p in CANDIDATE_PARQUETS]}."
     )
 
-# Paths de salida (reutilizan la estructura de iter19).
+# Output paths (reuse the iter19 structure).
 OUT_BASE = REPO_ROOT / "outputs"
 ITER_DIR = OUT_BASE / "iter19"
 WEIGHTS_DIR = ITER_DIR / "weights"
@@ -119,31 +119,31 @@ torch.manual_seed(SEED)
 np.random.seed(SEED)
 print(f"[iter19c] device={DEVICE}  torch={torch.__version__}")
 if DEVICE.type != "cuda":
-    print("[iter19c] WARNING: GPU no disponible. El entrenamiento sera muy lento. "
-          "Ejecuta este notebook en Colab Pro con T4 para tiempos razonables.")
+    print("[iter19c] WARNING: GPU not available. Training will be very slow. "
+          "Run this notebook in Colab Pro with T4 for reasonable runtimes.")
 
 # %%
-# Constantes globales del experimento.
-HORIZON = 3                                       # unico cambio metodologico vs iter19b
+# Global experiment constants.
+HORIZON = 3                                       # only methodological change vs iter19b
 TCN_FEATURE_COLS = list(FEATURES_10)
 N_INPUT_CHANNELS = 1 + len(TCN_FEATURE_COLS)
 XGB_NSE_H3_OFFICIAL = 0.6871                      # iter17, n_test = ?
 SANITY_THRESHOLD = 0.02
 
-print(f"[iter19c] HORIZON   = {HORIZON} (cada paso = 5 min, total = {HORIZON * 5} min adelante)")
-print(f"[iter19c] canales TCN = {N_INPUT_CHANNELS}  (target_hist + {TCN_FEATURE_COLS})")
+print(f"[iter19c] HORIZON   = {HORIZON} (each step = 5 min, total = {HORIZON * 5} min ahead)")
+print(f"[iter19c] TCN channels = {N_INPUT_CHANNELS}  (target_hist + {TCN_FEATURE_COLS})")
 
 # %%
-# Carga del parquet.
+# Load the parquet.
 t0 = time.time()
 df = pd.read_parquet(PARQUET_PATH)
-print(f"[iter19c] parquet cargado en {time.time() - t0:.1f}s. shape={df.shape}")
+print(f"[iter19c] parquet loaded in {time.time() - t0:.1f}s. shape={df.shape}")
 TOTAL_LEN = len(df)
 print(f"[iter19c] split: train_end={IDX_TRAIN_END}  val_end={IDX_VAL_END}  total={TOTAL_LEN}")
 
 missing = [c for c in [TARGET_COL] + TCN_FEATURE_COLS if c not in df.columns]
 if missing:
-    raise RuntimeError(f"Faltan columnas en parquet: {missing}")
+    raise RuntimeError(f"Missing columns in parquet: {missing}")
 
 # %%
 # Scaler con log1p_target=True (config A0).
@@ -177,9 +177,9 @@ FEATURE_ARR, TARGET_ARR = build_feature_array(SCALER)
 print(f"[iter19c] arrays normalizados shape = {FEATURE_ARR.shape}")
 
 # %%
-# Origins por L con horizon=3. Para L=72 H=3 las ventanas no cruzan frontera de
-# splits (iter17 convention). n_test sera marginalmente menor que en H=1
-# (~2 puntos menos por borde de val).
+# Origins by L with horizon=3. For L=72 H=3, the windows do not cross split
+# boundaries (iter17 convention). n_test will be marginally smaller than at H=1
+# (~2 fewer points due to the val boundary).
 
 L_FIXED = 72
 
@@ -270,10 +270,10 @@ def train_one_run(
     config: dict,
     n_workers: int = 2,
 ) -> dict:
-    """Entrena la TCN con la configuracion dada y evalua en val + test.
+    """Train the TCN with the given configuration and evaluate on val + test.
 
-    Early stopping monitorizando val (NSE en MGD). Mejores pesos guardados en
-    WEIGHTS_DIR/{run_id}.pt. Devuelve dict con metricas y arrays de prediccion.
+    Early stopping monitors val (NSE in MGD). Best weights are saved to
+    WEIGHTS_DIR/{run_id}.pt. Returns a dict with metrics and prediction arrays.
     """
     seed = int(config.get("seed", SEED))
     torch.manual_seed(seed)
@@ -421,7 +421,7 @@ def train_one_run(
 
 
 # %%
-# Configuracion A0 a H=3.
+# A0 configuration at H=3.
 A0_H3_CONFIG = dict(
     horizon=HORIZON,
     L=72,
@@ -445,8 +445,8 @@ for k, v in A0_H3_CONFIG.items():
     print(f"  {k} = {v}")
 
 # %%
-# Entrenamiento.
-print("\n[iter19c] === Entrenando A0 H=3 (log1p=True) y evaluando en test ===")
+# Training.
+print("\n[iter19c] === Training A0 H=3 (log1p=True) and evaluating on test ===")
 tcn_run = train_one_run("A0_h3", A0_H3_CONFIG)
 tcn_panel = tcn_run["test_panel"]
 TCN_NSE_H3 = float(tcn_panel["global"]["nse"])
@@ -454,8 +454,8 @@ print(f"\n[iter19c] TCN A0 H=3 test NSE = {TCN_NSE_H3:.4f}  "
       f"err_pico = {tcn_panel['global']['peak_err_pct']:+.1f}%  n={tcn_panel['global']['n']}")
 
 # %%
-# Re-entrenar XGB iter17 inline a H=3 para tener cifras alineadas.
-print("\n[iter19c] === Re-entrenando xgb_lag6_feat10 a H=3 para comparacion directa ===")
+# Retrain iter17 XGB inline at H=3 to get aligned figures.
+print("\n[iter19c] === Retraining xgb_lag6_feat10 at H=3 for direct comparison ===")
 xgb_out = train_xgboost_h(
     df,
     horizon=HORIZON,
@@ -465,7 +465,7 @@ xgb_out = train_xgboost_h(
     include_features=True,
     xgb_params=DEFAULT_XGB_PARAMS,
     early_stopping_rounds=DEFAULT_EARLY_STOPPING_ROUNDS,
-    seq_length=72,                # convencion oficial iter17
+    seq_length=72,                # official iter17 convention
     verbose=False,
 )
 xgb_y_true = xgb_out["y_true_test"]
@@ -483,7 +483,7 @@ if delta_xgb_sanity > SANITY_THRESHOLD:
     raise RuntimeError(
         f"[iter19c] SANITY FAIL: |XGB_NSE_inline ({XGB_NSE_INLINE_H3:.4f}) - "
         f"XGB_NSE_oficial_iter17 ({XGB_NSE_H3_OFFICIAL:.4f})| = {delta_xgb_sanity:.4f} "
-        f"> umbral {SANITY_THRESHOLD}. Algo en el split o las features ha cambiado. "
+        f"> threshold {SANITY_THRESHOLD}. Something in the split or the features has changed. "
         "PAUSAR Y AVISAR AL USUARIO antes de seguir (per spec iter19c)."
     )
 print(f"[iter19c] sanity OK: |XGB_inline - XGB_oficial| = {delta_xgb_sanity:.4f} "
@@ -500,7 +500,7 @@ else:
     print(f"[iter19c] alineacion OK: n_test TCN = n_test XGB = {n_tcn}")
 
 # %%
-# Veredicto.
+# Verdict.
 DELTA_NSE = TCN_NSE_H3 - XGB_NSE_H3_OFFICIAL
 THRESHOLD = 0.02
 VERDICT_H3 = "TCN_WINS" if DELTA_NSE >= THRESHOLD else "XGB_WINS"
@@ -508,7 +508,7 @@ VERDICT_H3 = "TCN_WINS" if DELTA_NSE >= THRESHOLD else "XGB_WINS"
 print("\n[iter19c] === VEREDICTO H=3 ===")
 print(f"  NSE TCN A0 H=3 (test)         = {TCN_NSE_H3:.4f}")
 print(f"  NSE XGB iter17 H=3 (oficial)  = {XGB_NSE_H3_OFFICIAL:.4f}")
-print(f"  NSE XGB inline H=3 (alineado) = {XGB_NSE_INLINE_H3:.4f}")
+print(f"  NSE XGB inline H=3 (aligned) = {XGB_NSE_INLINE_H3:.4f}")
 print(f"  delta NSE (TCN - XGB iter17)  = {DELTA_NSE:+.4f}")
 print(f"  umbral cierre                 = +{THRESHOLD:.3f}")
 print(f"  VEREDICTO H=3                 = {VERDICT_H3}")
@@ -545,11 +545,11 @@ def _sanitize(o):
 
 verdict_explanation = (
     f"TCN A0 H=3 supera a XGB iter17 H=3 por {DELTA_NSE:+.4f} NSE "
-    f"(>= umbral +{THRESHOLD}). Replica confirmada: A0 sigue siendo modelo principal a H=3."
+    f"(>= threshold +{THRESHOLD}). Replication confirmed: A0 remains the main model at H=3."
     if VERDICT_H3 == "TCN_WINS" else
     f"TCN A0 H=3 NO supera a XGB iter17 H=3 (delta={DELTA_NSE:+.4f} < umbral +{THRESHOLD}). "
     "El TCN no replica la ganancia de H=1 al alargar el horizonte; A0 queda confirmado como "
-    "modelo principal solo en H=1."
+    "main model only at H=1."
 )
 
 results_json = {
@@ -557,9 +557,9 @@ results_json = {
         "iter": "19c",
         "branch": "iter19-tcn-comparison",
         "purpose": (
-            "Replicar A0 (con log1p) a H=3 para cerrar comparacion contra XGB iter17 H=3. "
-            "Cierra el pendiente del HANDOFF_2026-04-29.md sobre validar A0 como modelo "
-            "principal del TFM en H=3."
+            "Replicate A0 (with log1p) at H=3 to close the comparison against XGB iter17 H=3. "
+            "This closes the pending item from HANDOFF_2026-04-29.md about validating A0 as the "
+            "main model of the TFM at H=3."
         ),
         "horizon": HORIZON,
         "config": dict(A0_H3_CONFIG),
@@ -636,13 +636,13 @@ DELTA_TCN_H3 = DELTA_NSE                            # variable
 lines: list = []
 lines.append("# Iter19c - TCN A0 (log1p=True) a H=3 vs XGB iter17 H=3\n")
 
-# 1. Resumen ejecutivo
-lines.append("## Resumen ejecutivo\n")
+# 1. Executive summary
+lines.append("## Executive summary\n")
 lines.append(
     f"Se replica la TCN A0 (L=72, C=32, log1p=True) a horizonte H=3 (15 minutos adelante) "
     f"con la misma config que en iter19b (H=1). NSE TCN A0 H=3 test = **{TCN_NSE_H3:.4f}**. "
     f"NSE XGB iter17 H=3 oficial = {XGB_NSE_H3_OFFICIAL:.4f}. "
-    f"NSE XGB inline H=3 (alineado, sanity) = {XGB_NSE_INLINE_H3:.4f}. "
+    f"NSE XGB inline H=3 (aligned, sanity) = {XGB_NSE_INLINE_H3:.4f}. "
     f"Delta = **{DELTA_NSE:+.4f}** (umbral cierre = +{THRESHOLD:.3f}). "
     f"VEREDICTO H=3: **{VERDICT_H3}**.\n"
 )
@@ -720,10 +720,10 @@ lines.append(
 lines.append("")
 lines.append(f"NSE de referencia oficial iter17 H=3 (xgb_lag6_feat10): **{XGB_NSE_H3_OFFICIAL:.4f}**.")
 lines.append(f"Delta usado para el veredicto: TCN({TCN_NSE_H3:.4f}) - XGB_iter17({XGB_NSE_H3_OFFICIAL:.4f}) = **{DELTA_NSE:+.4f}**.")
-lines.append(f"Umbral de cierre del DIAGNOSTIC_REPORT §7.6: +{THRESHOLD:.3f}.\n")
+lines.append(f"Threshold from DIAGNOSTIC_REPORT §7.6: +{THRESHOLD:.3f}.\n")
 
-# 4. Lectura honesta
-lines.append("## Lectura honesta\n")
+# 4. Honest reading
+lines.append("## Honest reading\n")
 
 # 4.1 Consistencia H=1 vs H=3
 lines.append(
@@ -754,19 +754,19 @@ else:
         "peso relativo. El GBM con lags explicitos absorbe estas ultimas eficientemente.\n"
     )
 
-# 4.2 Implicacion modelo principal TFM
+# 4.2 Main-model implication for the TFM
 if VERDICT_H3 == "TCN_WINS":
     lines.append(
-        "**Implicacion para el TFM**: A0 queda confirmado como modelo principal en H=1 y H=3. "
+        "**Implication for the TFM**: A0 is confirmed as the main model at H=1 and H=3. "
         "El cierre del pendiente del HANDOFF_2026-04-29.md §4 es positivo: STATE.md y "
         "EXPERIMENTS.md pueden actualizarse para reportar la TCN como modelo de referencia "
         "para el sistema operativo MSD a corto y medio plazo.\n"
     )
 else:
     lines.append(
-        "**Implicacion para el TFM**: A0 queda confirmado como modelo principal solo en H=1. "
+        "**Implication for the TFM**: A0 is confirmed as the main model only at H=1. "
         "A H=3 el GBM iguala o supera al TCN. Hay dos caminos honestos: (a) reportar el TCN "
-        "como modelo principal en H=1 y XGB para H=3, lo que fragmenta la solucion pero refleja "
+        "as the main model at H=1 and XGB for H=3, which fragments the solution but reflects "
         "el resultado real; (b) reportar XGB como modelo unico para H=1 y H=3 a costa de la "
         "ganancia operativa de +0.026 NSE en H=1, ganando coherencia y sencillez. El usuario "
         "decide; esta corrida no fuerza la respuesta.\n"
@@ -783,23 +783,23 @@ lines.append(
 if abs(b_ext_tcn["bias"]) < abs(b_ext_xgb["bias"]):
     lines.append(
         "La TCN sigue teniendo menor sesgo absoluto en eventos criticos a H=3. "
-        "Esto refuerza la decision de iter19b de elegir A0 como modelo principal "
+        "This reinforces the iter19b decision to choose A0 as the main model "
         "por motivos operativos, no solo por NSE global.\n"
     )
 else:
     lines.append(
         "El GBM tiene aqui un sesgo absoluto menor en eventos criticos a H=3, "
         "invirtiendo la ventaja operativa que A0 tenia en H=1. Otro punto a considerar "
-        "para la decision final del modelo principal.\n"
+        "for the final main-model decision.\n"
     )
 
-# 5. Veredicto y recomendacion
-lines.append("## Veredicto y recomendacion\n")
+# 5. Verdict and recommendation
+lines.append("## Verdict and recommendation\n")
 if VERDICT_H3 == "TCN_WINS":
     lines.append(
         f"**TCN_WINS en H=3** por margen >= {THRESHOLD:.3f} NSE. "
         f"Recomendacion: actualizar STATE.md y EXPERIMENTS.md para registrar A0 como modelo "
-        f"principal del TFM en H=1 y H=3. El handoff §4 queda cerrado positivamente. "
+        f"of the TFM at H=1 and H=3. Handoff §4 is closed positively. "
         f"Documentar el coste operativo de mantener una TCN en produccion (GPU, dependencia "
         f"PyTorch) frente al beneficio en NSE.\n"
     )
@@ -813,8 +813,8 @@ else:
         f"horizonte medio donde la TCN no aporta valor adicional.\n"
     )
 
-# 6. Limitaciones
-lines.append("## Limitaciones reconocidas\n")
+# 6. Limitations
+lines.append("## Recognized limitations\n")
 lines.append(
     "- Una sola seed (=42), igual que iter19/iter19b. La diferencia TCN vs XGB en H=3 puede "
     "estar dentro del ruido estocastico de inicializacion. Para mas certeza haria falta "
@@ -859,12 +859,12 @@ ax.plot(ts_test.iloc[i0:i1], yp_test[i0:i1], color="#d62728", linewidth=1.4, alp
         label="TCN A0 H=3")
 ax.plot(xgb_ts_dt.iloc[xi0:xi1], xgb_y_pred[xi0:xi1], color="#ff7f0e", linewidth=1.2,
         linestyle="--", alpha=0.9, label="XGB lag6+feat10 H=3")
-ax.axhline(50.0, linestyle=":", color="#888", linewidth=0.8, label="Umbral Extremo 50 MGD")
+ax.axhline(50.0, linestyle=":", color="#888", linewidth=0.8, label="Extremo Threshold 50 MGD")
 ax.set_title(
-    f"Hidrograma evento extremo de test (H=3) - TCN A0 vs XGB\n"
-    f"Pico real = {yt_test[i_peak_tcn]:.1f} MGD a {peak_ts}"
+    f"Test extreme-event hydrograph (H=3) - TCN A0 vs XGB\n"
+    f"Real peak = {yt_test[i_peak_tcn]:.1f} MGD at {peak_ts}"
 )
-ax.set_xlabel("Fecha")
+ax.set_xlabel("Date")
 ax.set_ylabel("stormflow (MGD)")
 ax.grid(alpha=0.3)
 ax.legend(loc="upper right")
@@ -906,7 +906,7 @@ plt.close(fig)
 print(f"[iter19c] figura: scatter_real_vs_pred_H3.png")
 
 # %%
-# Resumen final en consola.
+# Final summary in console.
 print("\n" + "=" * 80)
 print("iter19c - resumen final")
 print("=" * 80)
