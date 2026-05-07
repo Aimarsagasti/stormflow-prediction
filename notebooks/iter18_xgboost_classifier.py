@@ -1,31 +1,31 @@
 # -*- coding: utf-8 -*-
 """iter18_xgboost_classifier.py
 
-Notebook/script de iter18 para entrenar clasificadores binarios de alerta
-XGBoost sobre horizontes largos.
+Iter18 notebook/script for training binary XGBoost alert classifiers
+over longer horizons.
 
-Objetivo:
-- Mantener el regresor de iter17 como modelo principal para H=1/H=3.
-- Anadir un complemento operativo para responder:
-  "habra stormflow >= U en algun instante de t+1..t+h?".
+Objective:
+- Keep the iter17 regressor as the main model for H=1/H=3.
+- Add an operational complement to answer:
+  "will there be stormflow >= U at any point in t+1..t+h?".
 
-La formulacion confirmada por el usuario es la de ventana completa:
+The formulation confirmed by the user is the full-window one:
 `max(stormflow[t+1..t+h]) >= U`.
 """
 
 # %% [markdown]
-# # Iter18 - Clasificador binario de alerta XGBoost
+# # Iter18 - Binary XGBoost alert classifier
 #
-# - Verificacion de cache parquet y regeneracion si falta.
-# - Split temporal identico a iter17 / S2 para comparacion limpia.
-# - Cuatro variantes fijas:
+# - Parquet cache check and regeneration if missing.
+# - Temporal split identical to iter17 / S2 for a clean comparison.
+# - Four fixed variants:
 #   - h=6, U=25
 #   - h=6, U=50
 #   - h=12, U=25
 #   - h=12, U=50
-# - Umbral operativo elegido en validacion para cumplir recall >= 0.85
-#   cuando sea posible, sin tunear sobre test.
-# - Artefactos:
+# - Operational threshold chosen on validation to satisfy recall >= 0.85
+#   when possible, without tuning on test.
+# - Artifacts:
 #   - `outputs/diagnostic/iter18_classifier_results.json`
 #   - `outputs/diagnostic/iter18_comparison.md`
 #   - `outputs/figures/iter18/*.png`
@@ -46,14 +46,14 @@ import numpy as np
 import pandas as pd
 
 
-# Forzamos backend no interactivo para que el script funcione igual en local.
+# We force a non-interactive backend so the script behaves the same locally.
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
 ROOT = Path("C:/Dev/TFM")
 if str(ROOT) not in sys.path:
-    # Insertamos la raiz del repo para importar `src.*` desde el notebook.
+    # We insert the repo root to import `src.*` from the notebook.
     sys.path.insert(0, str(ROOT))
 
 PARQUET_PATH = ROOT / "outputs" / "cache" / "df_with_features.parquet"
@@ -63,7 +63,7 @@ FIG_DIR = ROOT / "outputs" / "figures" / "iter18"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
-# Estas son exactamente las cuatro variantes pedidas para iter18.
+# These are exactly the four variants requested for iter18.
 VARIANTS = [
     ("h6_u25", 6, 25.0),
     ("h6_u50", 6, 50.0),
@@ -73,11 +73,11 @@ VARIANTS = [
 
 
 # %%
-# Reproducimos el patron de iter17: si el cache no existe, regenerarlo antes
-# de cualquier entrenamiento para no depender de pasos manuales.
+# We reproduce the iter17 pattern: if the cache does not exist, regenerate it
+# before any training so we do not depend on manual steps.
 if not PARQUET_PATH.exists():
-    print(f"[iter18] Cache no encontrado en {PARQUET_PATH}")
-    print(f"[iter18] Regenerando via {GENERATE_STATS_SCRIPT}...")
+    print(f"[iter18] Cache not found at {PARQUET_PATH}")
+    print(f"[iter18] Regenerating via {GENERATE_STATS_SCRIPT}...")
     result = subprocess.run(
         [sys.executable, str(GENERATE_STATS_SCRIPT)],
         cwd=str(ROOT),
@@ -86,8 +86,8 @@ if not PARQUET_PATH.exists():
     print(f"[iter18] generate_dataset_stats.py return_code={result.returncode}")
     if not PARQUET_PATH.exists():
         raise RuntimeError(
-            f"El cache sigue sin existir tras regenerarlo: {PARQUET_PATH}. "
-            "Revisa `scripts/generate_dataset_stats.py`."
+            f"The cache still does not exist after regenerating it: {PARQUET_PATH}. "
+            "Check `scripts/generate_dataset_stats.py`."
         )
 else:
     print(f"[iter18] Cache OK: {PARQUET_PATH}")
@@ -103,18 +103,18 @@ from src.models.xgboost_classifier import (
 )
 
 print(f"[iter18] SEQ_LENGTH={SEQ_LENGTH}  FEATURES_10={len(FEATURES_10)}")
-print(f"[iter18] XGB params iniciales: {DEFAULT_XGB_CLASSIFIER_PARAMS}")
+print(f"[iter18] Initial XGB params: {DEFAULT_XGB_CLASSIFIER_PARAMS}")
 print(f"[iter18] early_stopping_rounds={DEFAULT_EARLY_STOPPING_ROUNDS}")
 
 # %%
 load_start = time.time()
 df = pd.read_parquet(PARQUET_PATH)
-print(f"[iter18] Parquet cargado en {time.time() - load_start:.1f}s. shape={df.shape}")
-print(f"[iter18] timestamp rango: {df['timestamp'].iloc[0]} -> {df['timestamp'].iloc[-1]}")
+print(f"[iter18] Parquet loaded in {time.time() - load_start:.1f}s. shape={df.shape}")
+print(f"[iter18] timestamp range: {df['timestamp'].iloc[0]} -> {df['timestamp'].iloc[-1]}")
 
 # %%
-# Sanity check de tamanos de split por horizonte para que los resultados sean
-# comparables con iter17 y con el diagnostico.
+# Sanity check of split sizes by horizon so the results remain
+# comparable with iter17 and the diagnostic.
 for _, horizon, _ in VARIANTS:
     split_idx = get_split_indices(df, horizon=horizon)
     print(
@@ -125,7 +125,7 @@ for _, horizon, _ in VARIANTS:
 
 # %%
 def _sanitize_json(obj: Any) -> Any:
-    """Convierte arrays/NaN/tipos NumPy en objetos serializables por JSON."""
+    """Convert arrays/NaN/NumPy types into JSON-serializable objects."""
     if isinstance(obj, dict):
         return {key: _sanitize_json(value) for key, value in obj.items()}
     if isinstance(obj, list):
@@ -145,7 +145,7 @@ def _sanitize_json(obj: Any) -> Any:
 
 
 def _fmt(value: Any, spec: str) -> str:
-    """Formatea valores para markdown con `n/a` cuando no aplica."""
+    """Format values for markdown with `n/a` when not applicable."""
     if value is None:
         return "n/a"
     if isinstance(value, float) and (np.isnan(value) or np.isinf(value)):
@@ -154,7 +154,7 @@ def _fmt(value: Any, spec: str) -> str:
 
 
 def _success_comment(variant_name: str, precision: float, recall: float) -> str:
-    """Evalua los criterios orientativos del reporte para cada variante."""
+    """Evaluate the report's guideline criteria for each variant."""
     if variant_name == "h6_u25":
         return "OK" if recall >= 0.70 and precision >= 0.50 else "NO"
     if variant_name == "h6_u50":
@@ -168,13 +168,13 @@ def _success_comment(variant_name: str, precision: float, recall: float) -> str:
 
 # %%
 # ---------------------------------------------------------------------------
-# Entrenamiento y evaluacion de las cuatro variantes
+# Training and evaluation of the four variants
 # ---------------------------------------------------------------------------
 variant_outputs: Dict[str, Dict[str, Any]] = {}
 results_json: Dict[str, Any] = {}
 
 for variant_name, horizon, threshold_mgd in VARIANTS:
-    print(f"\n[iter18] === Entrenando {variant_name} (H={horizon}, U={threshold_mgd:.1f}) ===")
+    print(f"\n[iter18] === Training {variant_name} (H={horizon}, U={threshold_mgd:.1f}) ===")
     trained = train_xgboost_classifier(
         df=df,
         horizon=horizon,
@@ -186,14 +186,14 @@ for variant_name, horizon, threshold_mgd in VARIANTS:
         verbose=False,
     )
 
-    # Elegimos el umbral operativo solo con validacion para no contaminar test.
+    # We choose the operational threshold using validation only to avoid contaminating test.
     operational_threshold = select_operational_threshold(
         y_true_bin=trained["y_true_bin_val"],
         y_prob=trained["y_prob_val"],
         min_recall=0.85,
     )
 
-    # Evaluamos tambien validacion para dejar trazabilidad del threshold elegido.
+    # We also evaluate validation to keep traceability of the chosen threshold.
     val_panel = evaluate_classification_panel(
         y_true_bin=trained["y_true_bin_val"],
         y_prob=trained["y_prob_val"],
@@ -201,7 +201,7 @@ for variant_name, horizon, threshold_mgd in VARIANTS:
         threshold_operational=operational_threshold,
     )
 
-    # En test anadimos serie cruda + U para poder reconstruir lead times reales.
+    # On test we add the raw series + U so we can reconstruct real lead times.
     test_panel = evaluate_classification_panel(
         y_true_bin=trained["y_true_bin_test"],
         y_prob=trained["y_prob_test"],
@@ -231,7 +231,7 @@ for variant_name, horizon, threshold_mgd in VARIANTS:
         f"thr_op={operational_threshold:.4f}  best_iter={trained['best_iteration']}"
     )
 
-    # Persistimos solo objetos serializables; el modelo queda fuera del JSON.
+    # We persist only serializable objects; the model stays out of the JSON.
     results_json[variant_name] = {
         "config": trained["config"],
         "fit_seconds": trained["fit_seconds"],
@@ -248,7 +248,7 @@ for variant_name, horizon, threshold_mgd in VARIANTS:
 
 # %%
 # ---------------------------------------------------------------------------
-# Guardado de resultados completos a JSON
+# Saving full results to JSON
 # ---------------------------------------------------------------------------
 iter18_json_path = OUT_DIR / "iter18_classifier_results.json"
 json_payload = {
@@ -273,11 +273,11 @@ json_payload = {
 }
 with open(iter18_json_path, "w", encoding="utf-8") as handle:
     json.dump(_sanitize_json(json_payload), handle, indent=2, ensure_ascii=False)
-print(f"[iter18] Escrito: {iter18_json_path}")
+print(f"[iter18] Written: {iter18_json_path}")
 
 # %%
 # ---------------------------------------------------------------------------
-# Figura 1: curvas PR superpuestas
+# Figure 1: overlaid PR curves
 # ---------------------------------------------------------------------------
 fig, ax = plt.subplots(figsize=(8.0, 6.0))
 for variant_name, _, _ in VARIANTS:
@@ -291,18 +291,18 @@ for variant_name, _, _ in VARIANTS:
 
 ax.set_xlabel("Recall")
 ax.set_ylabel("Precision")
-ax.set_title("Curvas Precision-Recall muestreadas (iter18)")
+ax.set_title("Sampled Precision-Recall curves (iter18)")
 ax.grid(alpha=0.3)
 ax.legend(loc="best")
 fig.tight_layout()
 pr_fig_path = FIG_DIR / "pr_curves.png"
 fig.savefig(pr_fig_path, dpi=140, bbox_inches="tight")
 plt.close(fig)
-print(f"[iter18] Figura: {pr_fig_path}")
+print(f"[iter18] Figure: {pr_fig_path}")
 
 # %%
 # ---------------------------------------------------------------------------
-# Figura 2: calibracion en 4 paneles
+# Figure 2: calibration in 4 panels
 # ---------------------------------------------------------------------------
 fig, axes = plt.subplots(2, 2, figsize=(11.0, 8.5), sharex=True, sharey=True)
 for axis, (variant_name, _, _) in zip(axes.flat, VARIANTS):
@@ -317,18 +317,18 @@ for axis, (variant_name, _, _) in zip(axes.flat, VARIANTS):
     axis.set_title(variant_name)
     axis.grid(alpha=0.3)
 
-fig.supxlabel("Probabilidad media predicha")
-fig.supylabel("Frecuencia empirica observada")
-fig.suptitle("Calibracion por deciles (iter18)", y=0.98)
+fig.supxlabel("Mean predicted probability")
+fig.supylabel("Observed empirical frequency")
+fig.suptitle("Calibration by deciles (iter18)", y=0.98)
 fig.tight_layout()
 calibration_fig_path = FIG_DIR / "calibration.png"
 fig.savefig(calibration_fig_path, dpi=140, bbox_inches="tight")
 plt.close(fig)
-print(f"[iter18] Figura: {calibration_fig_path}")
+print(f"[iter18] Figure: {calibration_fig_path}")
 
 # %%
 # ---------------------------------------------------------------------------
-# Figura 3: distribucion de lead times por variante
+# Figure 3: lead time distribution by variant
 # ---------------------------------------------------------------------------
 boxplot_labels = []
 boxplot_data = []
@@ -345,8 +345,8 @@ for variant_name, _, _ in VARIANTS:
 
 fig, ax = plt.subplots(figsize=(9.0, 5.0))
 if boxplot_data:
-    # Elegimos el nombre del parametro segun la firma disponible para evitar
-    # warnings entre versiones viejas y nuevas de Matplotlib.
+    # We choose the parameter name based on the available signature to avoid
+    # warnings between older and newer Matplotlib versions.
     boxplot_signature = inspect.signature(ax.boxplot)
     if "tick_labels" in boxplot_signature.parameters:
         ax.boxplot(boxplot_data, tick_labels=boxplot_labels, vert=True)
@@ -354,28 +354,28 @@ if boxplot_data:
         ax.boxplot(boxplot_data, labels=boxplot_labels, vert=True)
     ax.axhline(0.0, color="black", linestyle="--", linewidth=0.8)
     ax.set_ylabel("Lead time (min)")
-    ax.set_title("Distribucion de lead times por variante (eventos detectados)")
+    ax.set_title("Lead time distribution by variant (detected events)")
 else:
-    ax.text(0.5, 0.5, "No hubo eventos positivos detectados con lead time medible.", ha="center", va="center")
+    ax.text(0.5, 0.5, "No positive events with measurable lead time were detected.", ha="center", va="center")
     ax.set_axis_off()
 
 fig.tight_layout()
 lead_time_fig_path = FIG_DIR / "lead_time_distribution.png"
 fig.savefig(lead_time_fig_path, dpi=140, bbox_inches="tight")
 plt.close(fig)
-print(f"[iter18] Figura: {lead_time_fig_path}")
+print(f"[iter18] Figure: {lead_time_fig_path}")
 
 # %%
 # ---------------------------------------------------------------------------
-# Comparativa markdown requerida
+# Required markdown comparison
 # ---------------------------------------------------------------------------
 md_lines = []
-md_lines.append("# Iter18 - Comparativa del clasificador binario XGBoost\n")
+md_lines.append("# Iter18 - Binary XGBoost classifier comparison\n")
 md_lines.append(
-    "Clasificadores binarios entrenados sobre el mismo split temporal de iter17, "
-    "con target operacional `max(stormflow[t+1..t+h]) >= U`. "
-    "El umbral operativo se eligio exclusivamente en validacion para cumplir "
-    "recall >= 0.85 cuando fue posible.\n"
+    "Binary classifiers trained on the same temporal split as iter17, "
+    "with operational target `max(stormflow[t+1..t+h]) >= U`. "
+    "The operational threshold was chosen exclusively on validation to satisfy "
+    "recall >= 0.85 when possible.\n"
 )
 md_lines.append(
     "| Variante | Prevalencia test | AUC-PR | ROC-AUC | Prec@0.5 | Rec@0.5 | F1@0.5 | "
@@ -406,7 +406,7 @@ for variant_name, _, _ in VARIANTS:
     )
 
 md_lines.append("")
-md_lines.append("## Criterios de exito orientativos (§8.1)\n")
+md_lines.append("## Guideline success criteria (§8.1)\n")
 for variant_name, _, _ in VARIANTS:
     operational_metrics = variant_outputs[variant_name]["test_panel"]["operational_threshold_metrics"]
     precision_value = operational_metrics["precision"]
@@ -418,7 +418,7 @@ for variant_name, _, _ in VARIANTS:
     )
 
 md_lines.append("")
-md_lines.append("## Narrativa breve\n")
+md_lines.append("## Brief narrative\n")
 for variant_name, horizon, threshold_mgd in VARIANTS:
     test_panel = variant_outputs[variant_name]["test_panel"]
     lead_time = test_panel["lead_time"]
@@ -429,15 +429,15 @@ for variant_name, horizon, threshold_mgd in VARIANTS:
         f"AUC-PR={_fmt(threshold_free['auc_pr'], '.4f')}, "
         f"precision@op={_fmt(operational_metrics['precision'], '.3f')}, "
         f"recall@op={_fmt(operational_metrics['recall'], '.3f')}, "
-        f"lead time mediano={_fmt(lead_time['median_minutes'], '.1f')} min."
+        f"median lead time={_fmt(lead_time['median_minutes'], '.1f')} min."
     )
 
 md_lines.append("")
-md_lines.append("## Figuras asociadas\n")
+md_lines.append("## Associated figures\n")
 md_lines.append("- `outputs/figures/iter18/pr_curves.png`")
 md_lines.append("- `outputs/figures/iter18/calibration.png`")
 md_lines.append("- `outputs/figures/iter18/lead_time_distribution.png`")
 
 iter18_md_path = OUT_DIR / "iter18_comparison.md"
 iter18_md_path.write_text("\n".join(md_lines), encoding="utf-8")
-print(f"[iter18] Escrito: {iter18_md_path}")
+print(f"[iter18] Written: {iter18_md_path}")
