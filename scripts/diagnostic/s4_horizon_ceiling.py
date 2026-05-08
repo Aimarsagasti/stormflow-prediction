@@ -1,22 +1,22 @@
-"""
-S4 - Techo fisico de NSE alcanzable por horizonte y oraculos parciales.
+﻿"""
+S4 - Physical ceiling of achievable NSE by horizon and partial oracles.
 
-Objetivo: cuantificar para cada horizonte h en {1, 3, 6, 12, 24} cuanto puede
-mejorar el modelo respecto a la persistencia trivial (naive y AR(1)) y donde
-estan las palancas reales (que bucket de magnitud aporta mas al denominador
-del NSE y, por tanto, donde un acierto perfecto sube mas el NSE global).
+Objective: quantify for each horizon h in {1, 3, 6, 12, 24} how much the model
+can improve over trivial persistence (naive and AR(1)) and where the real levers
+are (which magnitude bucket contributes the most to the NSE denominator and,
+therefore, where a perfect prediction increases global NSE the most).
 
-Para los oraculos parciales del modelo TCN v1 actual (H=1, H=3, H=6 sinSF) se
-ejecuta inferencia en lote sobre todo el test alineado y se reemplaza la
-prediccion por el target real solo dentro del bucket o combinacion de buckets
-elegida; despues se recalcula el NSE global.
+For the partial oracles of the current TCN v1 model (H=1, H=3, H=6 sinSF), the
+script runs batch inference over the full aligned test set and replaces the
+prediction with the real target only inside the selected bucket or bucket
+combination; it then recomputes global NSE.
 
 Artefactos:
   - outputs/diagnostic/S4_horizon_ceiling.json
   - outputs/diagnostic/S4_horizon_ceiling.md
   - outputs/figures/diagnostic/s4_horizon_ceiling.png
 
-Solo se usan: pandas, numpy, sklearn, torch, matplotlib.
+Only uses: pandas, numpy, sklearn, torch, matplotlib.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# Inyectar raiz del proyecto al sys.path para poder importar src.*
+# Inject the project root into `sys.path` so `src.*` can be imported
 ROOT = Path("C:/Dev/TFM")
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -45,7 +45,7 @@ from src.models.tcn import TwoStageTCN  # type: ignore
 
 
 # ---------------------------------------------------------------------------
-# Configuracion
+# Configuration
 # ---------------------------------------------------------------------------
 PARQUET_PATH = ROOT / "outputs" / "cache" / "df_with_features.parquet"
 WEIGHTS_DIR = ROOT / "MC-CL-005" / "Pesos 13-04-2026"
@@ -63,8 +63,8 @@ HORIZONS = [1, 3, 6, 12, 24]  # 1=5min, 3=15min, 6=30min, 12=60min, 24=120min
 TARGET_COL = "stormflow_mgd"
 DEVICE = "cpu"
 
-# Buckets segun enunciado S4: Moderado [5, 25), Alto [25, 50), Extremo>=50.
-# Difieren de los del v1 metrics (que usa Alto [20, 50)) -> documentado en md.
+# Buckets according to the S4 prompt: Moderado [5, 25), Alto [25, 50), Extremo>=50.
+# They differ from the v1 metrics buckets (which use Alto [20, 50)) -> documented in the md.
 BUCKETS = [
     ("Base",     -np.inf, 0.5),
     ("Leve",     0.5,     5.0),
@@ -73,8 +73,8 @@ BUCKETS = [
     ("Extremo",  50.0,    np.inf),
 ]
 
-# Modelos v1 sinSF disponibles para inferencia (solo H1 y H3; H6_sinSF tiene NSE
-# negativo y H12/H24 no tienen modelo entrenado).
+# v1 sinSF models available for inference (only H1 and H3; H6_sinSF has negative NSE
+# and H12/H24 do not have a trained model).
 TCN_MODELS = {
     1: "modelo_H1_sinSF",
     3: "modelo_H3_sinSF",
@@ -82,7 +82,7 @@ TCN_MODELS = {
 }
 
 INFERENCE_BATCH = 1024
-CLS_THRESHOLD = 0.3  # mismo umbral que S3 / evaluate_local
+CLS_THRESHOLD = 0.3  # same threshold as S3 / evaluate_local
 
 
 # ---------------------------------------------------------------------------
@@ -111,7 +111,7 @@ def bucket_mask(y_true: np.ndarray, lo: float, hi: float) -> np.ndarray:
 # Indices alineados
 # ---------------------------------------------------------------------------
 def aligned_indices(split_start: int, split_end: int, horizon: int, total_len: int) -> np.ndarray:
-    """Mismo criterio que S2: ventana previa de SEQ_LENGTH completa y target dentro del df."""
+    """Same criterion as S2: full previous SEQ_LENGTH window and target inside the dataframe."""
     first = split_start + SEQ_LENGTH
     last_in_split = split_end - 1
     last_by_target = total_len - 1 - horizon
@@ -120,7 +120,7 @@ def aligned_indices(split_start: int, split_end: int, horizon: int, total_len: i
 
 
 # ---------------------------------------------------------------------------
-# Baselines analiticos
+# Analytical baselines
 # ---------------------------------------------------------------------------
 def naive_pred(df: pd.DataFrame, idx_test: np.ndarray) -> np.ndarray:
     return df[TARGET_COL].to_numpy()[idx_test]
@@ -129,7 +129,7 @@ def naive_pred(df: pd.DataFrame, idx_test: np.ndarray) -> np.ndarray:
 def ar1_optimal(
     df: pd.DataFrame, idx_train: np.ndarray, idx_test: np.ndarray, horizon: int
 ) -> Tuple[np.ndarray, float, float]:
-    """AR(1) optimo: y_hat = mean_train + rho_h * (y(t) - mean_train)."""
+    """Optimal AR(1): `y_hat = mean_train + rho_h * (y(t) - mean_train)`."""
     y = df[TARGET_COL].to_numpy()
     y_train_t = y[idx_train]
     y_train_th = y[idx_train + horizon]
@@ -142,7 +142,7 @@ def ar1_optimal(
 def ar_k_pred(
     df: pd.DataFrame, idx_train: np.ndarray, idx_test: np.ndarray, horizon: int, k: int
 ) -> np.ndarray:
-    """AR(k) por regresion lineal sobre k lags. Mismo metodo que S2."""
+    """AR(k) by linear regression over k lags. Same method as S2."""
     y = df[TARGET_COL].to_numpy()
     n = len(y)
     lags = np.full((n, k), np.nan, dtype=float)
@@ -161,7 +161,7 @@ def ar_k_pred(
 
 
 # ---------------------------------------------------------------------------
-# Inferencia TCN v1 sobre TODO el test alineado (en lotes)
+# TCN v1 inference over the entire aligned test set (in batches)
 # ---------------------------------------------------------------------------
 def load_tcn(model_stem: str) -> Tuple[TwoStageTCN, Dict]:
     weights_path = WEIGHTS_DIR / f"{model_stem}_weights.pt"
@@ -199,18 +199,18 @@ def infer_tcn_test(
     df: pd.DataFrame, model_stem: str, idx_test: np.ndarray, horizon: int,
     threshold: float = CLS_THRESHOLD,
 ) -> Tuple[np.ndarray, Dict]:
-    """Devuelve y_pred(t+h) en MGD para cada origen t_origin en idx_test.
+    """Returns y_pred(t+h) in MGD for each origin t_origin in idx_test.
 
-    Convencion de `src.pipeline.sequences`:
+    Convention from `src.pipeline.sequences`:
       - ventana = feat[t_origin - SEQ_LENGTH + 1 : t_origin + 1]  (incluye t_origin)
       - target  = y[t_origin + horizon]
 
-    En este script `idx_test` representa `t_origin`. Tal cual viene de
+    In this script `idx_test` represents `t_origin`. As it comes from
     `aligned_indices`, con `first = split_start + SEQ_LENGTH` y
     `last = total_len - 1 - horizon`, la ventana [origin - SEQ + 1, origin]
     siempre cabe en el df.
     """
-    print(f"[tcn] cargando {model_stem}...")
+    print(f"[tcn] loading {model_stem}...")
     model, norm_params = load_tcn(model_stem)
     df_norm = normalize_df(df, norm_params)
     features = norm_params["feature_columns"]
@@ -225,13 +225,13 @@ def infer_tcn_test(
     y_pred_norm = np.zeros(n_test, dtype=np.float32)
     cls_probs = np.zeros(n_test, dtype=np.float32)
 
-    print(f"[tcn] inferencia en lotes batch={INFERENCE_BATCH} ({n_test:,} muestras)...")
+    print(f"[tcn] batch inference batch={INFERENCE_BATCH} ({n_test:,} samples)...")
     t0 = time.time()
     with torch.no_grad():
         for start in range(0, n_test, INFERENCE_BATCH):
             end = min(start + INFERENCE_BATCH, n_test)
             batch_idx = idx_test[start:end]
-            # Ventana [t_origin - SEQ + 1, t_origin] incluyendo t_origin.
+            # Window [t_origin - SEQ + 1, t_origin] including t_origin.
             xs = np.stack(
                 [feat_arr[t - SEQ_LENGTH + 1 : t + 1] for t in batch_idx],
                 axis=0,
@@ -245,11 +245,11 @@ def infer_tcn_test(
             y_pred_norm[start:end] = y_norm
             if (start // INFERENCE_BATCH) % 50 == 0:
                 pct = 100.0 * end / n_test
-                print(f"    progreso {pct:5.1f}% ({end:,}/{n_test:,})")
+                print(f"    progress {pct:5.1f}% ({end:,}/{n_test:,})")
     elapsed = time.time() - t0
-    print(f"[tcn] inferencia completada en {elapsed:.1f}s")
+    print(f"[tcn] inference completed in {elapsed:.1f}s")
 
-    # Desnormalizar
+    # Denormalize
     y_pred = y_pred_norm * target_std + target_mean
     if use_log1p:
         y_pred = np.expm1(y_pred)
@@ -267,10 +267,10 @@ def infer_tcn_test(
 
 
 # ---------------------------------------------------------------------------
-# Oraculos parciales y contribucion al denominador
+# Partial oracles and denominator contribution
 # ---------------------------------------------------------------------------
 def bucket_contribution(y_true: np.ndarray) -> Dict[str, Dict[str, float]]:
-    """Contribucion de cada bucket al denominador del NSE (sum (y-mean)^2)."""
+    """Contribution of each bucket to the NSE denominator (`sum((y-mean)^2)`)."""
     mean_y = float(np.mean(y_true))
     sse_total = float(np.sum((y_true - mean_y) ** 2))
     out = {}
@@ -316,7 +316,7 @@ def oracle_partial(
 # Logica principal por horizonte
 # ---------------------------------------------------------------------------
 def run_horizon(df: pd.DataFrame, horizon: int) -> Dict[str, object]:
-    print(f"\n=== Horizonte h={horizon} ({horizon * 5} min) ===")
+    print(f"\n=== Horizon h={horizon} ({horizon * 5} min) ===")
     idx_train = aligned_indices(0, IDX_TRAIN_END, horizon, len(df))
     idx_test = aligned_indices(IDX_VAL_END, len(df), horizon, len(df))
     print(f"  n_train={len(idx_train):,}  n_test={len(idx_test):,}")
@@ -328,16 +328,16 @@ def run_horizon(df: pd.DataFrame, horizon: int) -> Dict[str, object]:
     y_hat_naive = naive_pred(df, idx_test)
     nse_naive = nse(y_true_test, y_hat_naive)
 
-    # 2) AR(1) optimo + cota teorica
+    # 2) Optimal AR(1) + theoretical bound
     y_hat_ar1, rho_h, mean_train = ar1_optimal(df, idx_train, idx_test, horizon)
     nse_ar1 = nse(y_true_test, y_hat_ar1)
-    bound_2rho_minus_1 = 2.0 * rho_h - 1.0  # cota superior bajo iid (informativa)
+    bound_2rho_minus_1 = 2.0 * rho_h - 1.0  # Upper bound under iid (informative)
 
-    # 3) AR(12) lineal
+    # 3) Linear AR(12)
     y_hat_ar12 = ar_k_pred(df, idx_train, idx_test, horizon, k=12)
     nse_ar12 = nse(y_true_test, y_hat_ar12)
 
-    # 4) Contribucion de buckets al denominador
+    # 4) Bucket contribution to the denominator
     contrib = bucket_contribution(y_true_test)
 
     result = {
@@ -361,7 +361,7 @@ def run_horizon(df: pd.DataFrame, horizon: int) -> Dict[str, object]:
         "buckets_contribution": contrib,
     }
 
-    # 5) Oraculos parciales: solo para horizontes con TCN entrenado.
+    # 5) Partial oracles: only for horizons with a trained TCN.
     if horizon in TCN_MODELS:
         model_stem = TCN_MODELS[horizon]
         y_pred_tcn, info = infer_tcn_test(df, model_stem, idx_test, horizon)
@@ -371,7 +371,7 @@ def run_horizon(df: pd.DataFrame, horizon: int) -> Dict[str, object]:
         peak_pred = float(np.max(y_pred_tcn))
         peak_err_pct = (peak_pred - peak_real) / peak_real * 100.0 if peak_real > 0 else float("nan")
 
-        # Bias y RMSE por bucket usando el TCN (sanity check vs metrics.json)
+        # Bias and RMSE by bucket using the TCN (sanity check vs metrics.json)
         bucket_metrics_tcn = {}
         for bname, lo, hi in BUCKETS:
             m = bucket_mask(y_true_test, lo, hi)
@@ -390,7 +390,7 @@ def run_horizon(df: pd.DataFrame, horizon: int) -> Dict[str, object]:
                 "sse_residual": float(np.sum((yt - yp) ** 2)),
             }
 
-        # Oraculos parciales
+        # Partial oracles
         oracles = {
             "extremo": oracle_partial(y_true_test, y_pred_tcn, ["Extremo"]),
             "extremo_alto": oracle_partial(y_true_test, y_pred_tcn, ["Extremo", "Alto"]),
@@ -416,14 +416,14 @@ def run_horizon(df: pd.DataFrame, horizon: int) -> Dict[str, object]:
         }
         result["oracles"] = oracles
     else:
-        # Para H=12 y H=24 no hay TCN. Se reporta solo el techo analitico.
+        # For H=12 and H=24 there is no TCN. We report only the analytical ceiling.
         result["tcn_v1"] = None
         result["oracles"] = None
 
     print(f"  NSE naive={nse_naive:.4f}  AR(1)opt={nse_ar1:.4f}  AR(12)={nse_ar12:.4f}")
-    print(f"  rho_h={rho_h:.4f}  cota 2rho-1={bound_2rho_minus_1:.4f}")
+    print(f"  rho_h={rho_h:.4f}  2rho-1 bound={bound_2rho_minus_1:.4f}")
     if result["tcn_v1"] is not None:
-        print(f"  TCN v1 NSE={result['tcn_v1']['nse']:.4f}  pico_err={result['tcn_v1']['peak_err_pct']:+.1f}%")
+        print(f"  TCN v1 NSE={result['tcn_v1']['nse']:.4f}  peak_err={result['tcn_v1']['peak_err_pct']:+.1f}%")
         for k, v in result["oracles"].items():
             print(f"  oracle[{k}] NSE={v['nse']:.4f}  delta={v['delta_nse_vs_tcn']:+.4f}")
 
@@ -446,19 +446,19 @@ def make_plot(all_results: Dict[int, Dict[str, object]], path: Path) -> None:
     ]
 
     fig, ax = plt.subplots(figsize=(8.5, 5.5), dpi=130)
-    ax.plot(h_min, nse_naive, "o--", color="#888", label="Naive (persistencia)")
-    ax.plot(h_min, nse_ar1, "s--", color="#1f77b4", label=r"AR(1) optimo ($\rho_h$)")
-    ax.plot(h_min, nse_ar12, "^--", color="#2ca02c", label="AR(12) lineal")
-    ax.plot(h_min, bound, ":", color="#d62728", label=r"Cota analitica $2\rho_h-1$")
+    ax.plot(h_min, nse_naive, "o--", color="#888", label="Naive (persistence)")
+    ax.plot(h_min, nse_ar1, "s--", color="#1f77b4", label=r"Optimal AR(1) ($\rho_h$)")
+    ax.plot(h_min, nse_ar12, "^--", color="#2ca02c", label="Linear AR(12)")
+    ax.plot(h_min, bound, ":", color="#d62728", label=r"Analytical bound $2\rho_h-1$")
     tcn_h = [h for h, v in zip(h_min, nse_tcn) if v is not None]
     tcn_v = [v for v in nse_tcn if v is not None]
     if tcn_h:
         ax.plot(tcn_h, tcn_v, "*-", color="#9467bd", markersize=14, label="TCN v1 sinSF")
 
     ax.axhline(0, color="k", lw=0.5)
-    ax.set_xlabel("Horizonte (minutos)")
-    ax.set_ylabel("NSE en test alineado")
-    ax.set_title("Techo de NSE alcanzable por horizonte (target = stormflow_mgd)")
+    ax.set_xlabel("Horizon (minutes)")
+    ax.set_ylabel("NSE on aligned test")
+    ax.set_title("Achievable NSE ceiling by horizon (target = stormflow_mgd)")
     ax.set_xticks(h_min)
     ax.set_xticklabels([f"{m} min\n(h={h})" for m, h in zip(h_min, horizons)])
     ax.grid(alpha=0.3)
@@ -466,7 +466,7 @@ def make_plot(all_results: Dict[int, Dict[str, object]], path: Path) -> None:
     fig.tight_layout()
     fig.savefig(path)
     plt.close(fig)
-    print(f"[plot] escrito {path}")
+    print(f"[plot] written {path}")
 
 
 # ---------------------------------------------------------------------------
@@ -474,38 +474,38 @@ def make_plot(all_results: Dict[int, Dict[str, object]], path: Path) -> None:
 # ---------------------------------------------------------------------------
 def format_md(all_results: Dict[int, Dict[str, object]]) -> str:
     lines: List[str] = []
-    lines.append("# S4 - Techo de NSE alcanzable por horizonte\n")
+    lines.append("# S4 - Achievable NSE ceiling by horizon\n")
     lines.append(
-        "Cuantificacion del techo de NSE alcanzable con las features actuales y "
-        "sin informacion futura externa. Para cada horizonte h se reportan los "
-        "baselines AR analiticos, la cota teorica de un AR(1) optimo, el TCN v1 "
-        "(cuando hay modelo) y oraculos parciales por bucket de magnitud.\n"
+        "Quantification of the achievable NSE ceiling with the current features and "
+        "without external future information. For each horizon h, the "
+        "analytical AR baselines, the theoretical ceiling of an optimal AR(1), the TCN v1 "
+        "(when a model is available), and partial oracles by magnitude bucket.\n"
     )
 
-    # Metodologia
-    lines.append("## Metodologia\n")
+    # Methodology
+    lines.append("## Methodology\n")
     lines.append(
-        "- **Split test cronologico**: `iloc[936669:]`, mismos indices alineados que "
-        "S2 (ventana previa de 72 pasos completa, target dentro del df).\n"
-        "- **Buckets MGD**: Base<0.5; Leve [0.5, 5); Moderado [5, 25); Alto [25, 50); Extremo>=50. "
-        "Notar que `evaluate_local.py` usa Alto [20, 50) para reportar el v1; aqui se "
-        "recalcula con [25, 50) para ser consistentes con el enunciado del diagnostico.\n"
-        "- **AR(1) optimo**: rho_h = corr(y(t), y(t+h)) sobre train; "
+        "- **Chronological test split**: `iloc[936669:]`, same aligned indices as "
+        "S2 (full previous 72-step window, target inside the dataframe).\n"
+        "- **MGD buckets**: Base<0.5; Leve [0.5, 5); Moderado [5, 25); Alto [25, 50); Extremo>=50. "
+        "Note that `evaluate_local.py` uses Alto [20, 50) to report v1; here it is "
+        "recomputed with [25, 50) to stay consistent with the diagnostic statement.\n"
+        "- **Optimal AR(1)**: rho_h = corr(y(t), y(t+h)) on train; "
         "y_hat = mean_train + rho_h*(y(t) - mean_train).\n"
-        "- **Cota analitica `2*rho_h - 1`**: maximo NSE alcanzable por un predictor "
-        "lineal ortogonal de y(t) cuando rho_h > 0.5 (cota informativa, no tope absoluto).\n"
-        "- **AR(12)**: regresion lineal con 12 lags consecutivos.\n"
-        "- **TCN v1 sinSF**: inferencia en lote sobre todo el test alineado, switch "
-        "duro con threshold=0.3 (mismo que evaluate_local). Solo disponible para H=1, H=3, H=6.\n"
-        "- **Oraculo parcial**: para los buckets indicados, y_pred = y_true; el resto "
-        "queda igual. NSE recalculado sobre todo el test.\n"
+        "- **Analytical bound `2*rho_h - 1`**: maximum NSE reachable by an "
+        "orthogonal linear predictor of y(t) when rho_h > 0.5 (informative bound, not an absolute ceiling).\n"
+        "- **AR(12)**: linear regression with 12 consecutive lags.\n"
+        "- **TCN v1 sinSF**: batch inference over the full aligned test set, hard "
+        "switch with threshold=0.3 (same as evaluate_local). Available only for H=1, H=3, H=6.\n"
+        "- **Partial oracle**: for the indicated buckets, y_pred = y_true; the rest "
+        "stays the same. NSE is recomputed over the full test.\n"
     )
 
-    # Tabla maestra
-    lines.append("## Tabla maestra: NSE por horizonte\n")
+    # Master table
+    lines.append("## Master table: NSE by horizon\n")
     lines.append(
-        "| h | min | n_test | rho_h | NSE naive | NSE AR(1)opt | cota 2rho-1 | "
-        "NSE AR(12) | NSE TCN v1 | Pico err % |"
+        "| h | min | n_test | rho_h | NSE naive | NSE AR(1)opt | 2rho-1 bound | "
+        "NSE AR(12) | NSE TCN v1 | Peak err % |"
     )
     lines.append("|---|----:|-------:|------:|---------:|-------------:|------------:|----------:|----------:|----------:|")
     for h in sorted(all_results.keys()):
@@ -522,19 +522,19 @@ def format_md(all_results: Dict[int, Dict[str, object]]) -> str:
         )
     lines.append("")
     lines.append(
-        "Lectura rapida: `naive` es el suelo trivial; `AR(1) optimo` lo bate "
-        "ligeramente porque mueve la prediccion hacia la media de train cuando rho_h<1; "
-        "`AR(12)` aprovecha lags adicionales pero la mejora marginal indica que la "
-        "memoria mas alla de un par de lags ya esta saturada; la cota `2*rho-1` da el "
-        "techo teorico de un AR(1) bajo independencia de errores.\n"
+        "Quick reading: `naive` is the trivial floor; `optimal AR(1)` beats it "
+        "slightly because it pulls predictions toward the train mean when rho_h<1; "
+        "`AR(12)` uses additional lags but the marginal improvement indicates that the "
+        "memory beyond a couple of lags is already saturated; the `2*rho-1` bound gives the "
+        "theoretical ceiling of an AR(1) under independent errors.\n"
     )
 
-    # Contribucion de buckets al denominador
-    lines.append("## Contribucion de cada bucket al denominador del NSE\n")
+    # Bucket contribution to the denominator
+    lines.append("## Contribution of each bucket to the NSE denominator\n")
     lines.append(
-        "Donde se concentra la varianza de y_true (sum (y-mean)^2). Si un bucket "
-        "aporta el X% del denominador, mejorar la prediccion ahi sube el NSE en "
-        "proporcion al X%. **Es la palanca principal**.\n"
+        "Where the variance of y_true is concentrated (sum (y-mean)^2). If a bucket "
+        "contributes X% of the denominator, improving the prediction there raises NSE "
+        "proportionally by X%. **This is the main lever.**\n"
     )
     bucket_names = [b[0] for b in BUCKETS]
     lines.append("| h | total SSE | " + " | ".join(f"{b} %denom" for b in bucket_names) + " |")
@@ -559,11 +559,11 @@ def format_md(all_results: Dict[int, Dict[str, object]]) -> str:
         lines.append("| " + " | ".join(row) + " |")
     lines.append("")
 
-    # Oraculos parciales
-    lines.append("## Oraculos parciales sobre TCN v1 (solo h con modelo entrenado)\n")
+    # Partial oracles
+    lines.append("## Partial oracles on TCN v1 (only h with a trained model)\n")
     lines.append(
-        "Reemplazo y_pred = y_true dentro del bucket o combinacion indicada, NSE recalculado "
-        "sobre todo el test. La columna `delta` es el incremento sobre el TCN v1.\n"
+        "Replace y_pred = y_true inside the indicated bucket or combination, then recompute "
+        "NSE over the full test. The `delta` column is the increment over TCN v1.\n"
     )
     for h in sorted(all_results.keys()):
         r = all_results[h]
@@ -573,19 +573,19 @@ def format_md(all_results: Dict[int, Dict[str, object]]) -> str:
         lines.append(f"### h={h} ({r['horizon_min']} min)\n")
         lines.append(
             f"- TCN v1 base: NSE = **{nse_tcn:.4f}**, "
-            f"pico real {r['tcn_v1']['peak_real']:.1f} MGD, "
-            f"pico predicho {r['tcn_v1']['peak_pred']:.1f} MGD "
+            f"real peak {r['tcn_v1']['peak_real']:.1f} MGD, "
+            f"predicted peak {r['tcn_v1']['peak_pred']:.1f} MGD "
             f"({r['tcn_v1']['peak_err_pct']:+.1f}%).\n"
         )
-        lines.append("| Oraculo | n muestras oraculizadas | NSE oraculo | delta NSE |")
+        lines.append("| Oracle | n oracle samples | Oracle NSE | delta NSE |")
         lines.append("|---|---:|---:|---:|")
         order = [
-            ("extremo", "Solo Extremo (>=50)"),
-            ("extremo_alto", "Extremo + Alto (>=25)"),
-            ("moderado", "Solo Moderado [5,25)"),
+            ("extremo", "Only Extreme (>=50)"),
+            ("extremo_alto", "Extreme + High (>=25)"),
+            ("moderado", "Only Moderate [5,25)"),
             ("leve_base", "Leve + Base (<5)"),
-            ("moderado_leve_base", "Moderado + Leve + Base (<25)"),
-            ("todo_excepto_extremo", "Todo excepto Extremo (<50)"),
+            ("moderado_leve_base", "Moderate + Leve + Base (<25)"),
+            ("todo_excepto_extremo", "Everything except Extreme (<50)"),
         ]
         for k, label in order:
             o = r["oracles"][k]
@@ -595,7 +595,7 @@ def format_md(all_results: Dict[int, Dict[str, object]]) -> str:
             )
         # Bucket metrics del TCN
         lines.append("")
-        lines.append("Metricas del TCN v1 por bucket (sanity check):\n")
+        lines.append("TCN v1 metrics by bucket (sanity check):\n")
         lines.append("| Bucket | n | bias | RMSE | NSE local | SSE residual | %SSE residual |")
         lines.append("|---|---:|---:|---:|---:|---:|---:|")
         sse_total_residual = sum(
@@ -621,21 +621,21 @@ def format_md(all_results: Dict[int, Dict[str, object]]) -> str:
 
 def build_verdict(all_results: Dict[int, Dict[str, object]]) -> str:
     lines: List[str] = []
-    lines.append("## Sintesis cuantitativa y veredicto\n")
+    lines.append("## Quantitative synthesis and verdict\n")
 
-    # 1. Horizonte con mayor ganancia teorica posible
+    # 1. Horizon with the highest possible theoretical gain
     gains = {}
     for h in sorted(all_results.keys()):
         r = all_results[h]
-        # Tope fisico estimado: max( cota 2*rho-1, NSE AR(12), NSE TCN v1 )
+        # Estimated physical ceiling: max( 2*rho-1 bound, NSE AR(12), NSE TCN v1 )
         candidates = [r["bound_2rho_minus_1"], r["nse_ar12"]]
         if r.get("tcn_v1") is not None:
             candidates.append(r["tcn_v1"]["nse"])
         nse_max_phys = max(candidates)
         ganancia = nse_max_phys - r["nse_naive"]
         gains[h] = (nse_max_phys, ganancia)
-    lines.append("### 1. Horizonte que merece la pena optimizar\n")
-    lines.append("| h | min | NSE naive | NSE max fisico estimado | Ganancia max sobre naive |")
+    lines.append("### 1. Horizon worth optimizing\n")
+    lines.append("| h | min | NSE naive | Estimated physical NSE max | Max gain over naive |")
     lines.append("|---|---:|---:|---:|---:|")
     for h in sorted(all_results.keys()):
         r = all_results[h]
@@ -646,17 +646,17 @@ def build_verdict(all_results: Dict[int, Dict[str, object]]) -> str:
         )
     h_best = max(gains.keys(), key=lambda h: gains[h][1])
     lines.append(
-        f"\n**Horizonte de maxima ganancia teorica: h={h_best} ({h_best*5} min)** "
-        f"con margen de {gains[h_best][1]:+.4f} NSE sobre naive.\n"
+        f"\n**Horizon with maximum theoretical gain: h={h_best} ({h_best*5} min)** "
+        f"with a margin of {gains[h_best][1]:+.4f} NSE over naive.\n"
     )
 
     # 2. NSE max defendible
-    lines.append("### 2. NSE maximo defendible por horizonte (modelo perfecto, mismas features)\n")
+    lines.append("### 2. Maximum defensible NSE by horizon (perfect model, same features)\n")
     lines.append(
-        "Tope superior estimado: maximo entre la cota analitica `2*rho-1` (que asume "
-        "predictor AR(1) optimo bajo iid) y la mejor evidencia empirica disponible "
-        "(AR(12) o TCN v1). Tomamos el mayor de los dos como techo conservador "
-        "alcanzable con la informacion disponible.\n"
+        "Estimated upper bound: the maximum between the analytical `2*rho-1` bound ("
+        "which assumes an optimal AR(1) predictor under iid) and the best available "
+        "empirical evidence (AR(12) or TCN v1). We take the larger of the two as a conservative ceiling "
+        "reachable with the available information.\n"
     )
     for h in sorted(all_results.keys()):
         r = all_results[h]
@@ -672,47 +672,47 @@ def build_verdict(all_results: Dict[int, Dict[str, object]]) -> str:
         )
     lines.append("")
 
-    # 3. Mayor palanca cuantitativa
-    lines.append("### 3. Mayor palanca cuantitativa para subir NSE en H=1\n")
+    # 3. Main quantitative lever
+    lines.append("### 3. Main quantitative lever for improving NSE at H=1\n")
     if 1 in all_results and all_results[1].get("oracles") is not None:
         r1 = all_results[1]
         oracles = r1["oracles"]
-        # Buscar el oraculo con maximo delta
-        # Comparar oraculos individuales y combinados
+        # Find the oracle with the maximum delta
+        # Compare individual and combined oracles
         ranked = sorted(oracles.items(), key=lambda kv: -kv[1]["delta_nse_vs_tcn"])
         lines.append(
-            f"TCN v1 actual: NSE = **{r1['tcn_v1']['nse']:.4f}**. Si el modelo acertara "
-            "perfectamente dentro del bucket indicado (manteniendo el resto), el NSE pasaria a:\n"
+            f"TCN v1 actual: NSE = **{r1['tcn_v1']['nse']:.4f}**. If the model predicted "
+            "perfectly inside the indicated bucket (keeping the rest unchanged), NSE would become:\n"
         )
-        lines.append("| Oraculo | NSE oraculo | delta NSE | n |")
+        lines.append("| Oracle | Oracle NSE | delta NSE | n |")
         lines.append("|---|---:|---:|---:|")
         for k, v in ranked:
             lines.append(
                 f"| {k} | {v['nse']:.4f} | {v['delta_nse_vs_tcn']:+.4f} | {v['n_oracled']:,} |"
             )
-        # Veredicto
+        # Verdict
         best_single = max(
             ["extremo", "moderado", "leve_base"],
             key=lambda k: oracles[k]["delta_nse_vs_tcn"],
         )
         lines.append(
-            f"\n**Palanca dominante en H=1**: el oraculo que mas sube el NSE individualmente "
+            f"\n**Dominant lever at H=1**: the oracle that raises NSE the most individually "
             f"es `{best_single}` con delta = "
             f"{oracles[best_single]['delta_nse_vs_tcn']:+.4f} NSE. "
-            f"Esto coincide con la contribucion al denominador de ese bucket.\n"
+            f"This matches the denominator contribution of that bucket.\n"
         )
-        # Recordar contribucion al denominador
+        # Recall denominator contribution
         c1 = r1["buckets_contribution"]
-        lines.append("Contribucion al denominador (H=1) de los buckets clave:\n")
+        lines.append("Denominator contribution (H=1) of the key buckets:\n")
         for bn in ["Extremo", "Alto", "Moderado", "Leve", "Base"]:
             lines.append(
-                f"- **{bn}**: {c1[bn]['share_denom_pct']:.2f}% del denominador "
-                f"({c1[bn]['n']:,} muestras = {c1[bn]['share_n_pct']:.3f}% del test)."
+                f"- **{bn}**: {c1[bn]['share_denom_pct']:.2f}% of the denominator "
+                f"({c1[bn]['n']:,} samples = {c1[bn]['share_n_pct']:.3f}% of test)."
             )
         lines.append("")
 
-    # 4. Tiene sentido perseguir H=6?
-    lines.append("### 4. Tiene sentido perseguir H=6 (30 min)?\n")
+    # 4. Does it make sense to pursue H=6?
+    lines.append("### 4. Does it make sense to pursue H=6 (30 min)?\n")
     if 6 in all_results:
         r6 = all_results[6]
         nse_max_h6, gan_h6 = gains[6]
@@ -721,24 +721,24 @@ def build_verdict(all_results: Dict[int, Dict[str, object]]) -> str:
             f"(rho_h={r6['rho_h_train']:.4f}, AR(1)opt={r6['nse_ar1_opt']:.4f}, "
             f"AR(12)={r6['nse_ar12']:.4f}).\n"
             f"- TCN v1 sinSF a H=6 = **{r6['tcn_v1']['nse']:.4f}** (segun S4 inference).\n"
-            f"- NSE max fisico estimado H=6 = **{nse_max_h6:.4f}**.\n"
+            f"- Estimated physical NSE max H=6 = **{nse_max_h6:.4f}**.\n"
         )
         if nse_max_h6 < 0.5:
             lines.append(
-                "Veredicto: el techo fisico de H=6 con las features actuales esta **por debajo "
-                "de NSE=0.5**. Perseguir H=6 con el dataset actual no llevara a un modelo "
-                "operativo defensible. Para abrir H=6 hace falta features exogenas con horizonte "
-                "futuro (forecast de lluvia, NWP) o cambiar el horizonte objetivo.\n"
+                "Verdict: the physical ceiling of H=6 with the current features is **below "
+                "NSE=0.5**. Pursuing H=6 with the current dataset will not yield a "
+                "defensible operational model. Opening H=6 requires exogenous features with a future horizon "
+                "(rainfall forecast, NWP) or changing the target horizon.\n"
             )
         elif nse_max_h6 < 0.7:
             lines.append(
-                "Veredicto: H=6 alcanzable pero con techo claramente inferior a H=1/H=3. "
-                "Decision arquitectonica: aceptar el techo o reformular el target (eventos "
-                "de tormenta agregados en lugar de stormflow puntual).\n"
+                "Verdict: H=6 is reachable but with a ceiling clearly below H=1/H=3. "
+                "Architectural decision: accept the ceiling or reformulate the target ("
+                "aggregated storm events instead of point stormflow).\n"
             )
         else:
             lines.append(
-                "Veredicto: H=6 sigue teniendo techo razonable; merece la pena explorarlo.\n"
+                "Verdict: H=6 still has a reasonable ceiling; it is worth exploring.\n"
             )
     return "\n".join(lines)
 
@@ -760,7 +760,7 @@ def main() -> None:
     try:
         make_plot(all_results, fig_path)
     except Exception as exc:
-        print(f"[plot] AVISO: no se pudo generar el plot ({exc})")
+        print(f"[plot] WARNING: the plot could not be generated ({exc})")
 
     # JSON
     meta = {
@@ -794,14 +794,16 @@ def main() -> None:
     json_path = OUT_DIR / "S4_horizon_ceiling.json"
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(_clean({"meta": meta, "results": all_results}), f, indent=2, ensure_ascii=False)
-    print(f"[out] escrito {json_path}")
+    print(f"[out] written {json_path}")
 
     md = format_md(all_results)
     md_path = OUT_DIR / "S4_horizon_ceiling.md"
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(md + "\n")
-    print(f"[out] escrito {md_path}")
+    print(f"[out] written {md_path}")
 
 
 if __name__ == "__main__":
     main()
+
+

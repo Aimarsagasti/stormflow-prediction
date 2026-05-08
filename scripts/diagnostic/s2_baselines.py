@@ -1,16 +1,16 @@
 """
-S2 - Baselines rigurosos para contextualizar el TwoStageTCN v1.
+S2 - Rigorous baselines to contextualize TwoStageTCN v1.
 
-Objetivo: entrenar y evaluar una bateria de baselines clasicos y de ML tabular
-(persistencia, AR(k), regresion fisica, XGBoost, RandomForest) sobre el mismo
-split cronologico 70/15/15 y los mismos indices de test que usaria la TCN con
-seq_length=72 y horizon h en {1, 3, 6}.
+Objective: train and evaluate a battery of classical baselines and tabular ML models
+(persistence, AR(k), physical regression, XGBoost, RandomForest) on the same
+chronological 70/15/15 split and the same test indices that the TCN would use with
+`seq_length=72` and horizon `h` in `{1, 3, 6}`.
 
-Escribe dos artefactos:
+Writes two artifacts:
   - outputs/diagnostic/S2_baselines.json
   - outputs/diagnostic/S2_baselines.md
 
-Solo se usan: pandas, numpy, sklearn, xgboost.
+Only uses: pandas, numpy, sklearn, xgboost.
 """
 
 from __future__ import annotations
@@ -28,18 +28,18 @@ from xgboost import XGBRegressor
 
 
 # ---------------------------------------------------------------------------
-# Configuracion
+# Configuration
 # ---------------------------------------------------------------------------
 ROOT = Path("C:/Dev/TFM")
 PARQUET_PATH = ROOT / "outputs" / "cache" / "df_with_features.parquet"
 OUT_DIR = ROOT / "outputs" / "diagnostic"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# Split cronologico 70/15/15 (indices ya definidos por la pipeline oficial).
+# Chronological 70/15/15 split (indices already defined by the official pipeline).
 IDX_TRAIN_END = 771374
 IDX_VAL_END = 936669
 
-SEQ_LENGTH = 72  # mismo contexto temporal que la TCN
+SEQ_LENGTH = 72  # same temporal context as the TCN
 HORIZONS = [1, 3, 6]
 
 TARGET_COL = "stormflow_mgd"
@@ -66,7 +66,7 @@ BUCKETS = [
     ("Extremo",  50.0,    np.inf),
 ]
 
-# Hiperparametros fijos (sin tuning).
+# Fixed hyperparameters (no tuning).
 XGB_PARAMS = dict(
     n_estimators=300,
     max_depth=6,
@@ -87,7 +87,7 @@ RF_TRAIN_SUBSAMPLE = 300_000  # limite para que quepa en RAM / tiempo razonable
 
 
 # ---------------------------------------------------------------------------
-# Metricas
+# Metrics
 # ---------------------------------------------------------------------------
 def nse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     denom = np.sum((y_true - np.mean(y_true)) ** 2)
@@ -147,24 +147,24 @@ def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, object]
 
 
 # ---------------------------------------------------------------------------
-# Construccion de datasets
+# Dataset construction
 # ---------------------------------------------------------------------------
 def build_target(df: pd.DataFrame, horizon: int) -> np.ndarray:
-    """y_target(t) = stormflow_mgd(t + horizon). NaN en las ultimas horizon filas."""
+    """`y_target(t) = stormflow_mgd(t + horizon)`. NaN in the last `horizon` rows."""
     return df[TARGET_COL].shift(-horizon).to_numpy()
 
 
 def aligned_indices(
     split_start: int, split_end: int, horizon: int, total_len: int
 ) -> np.ndarray:
-    """Indices absolutos t tales que:
-      - existe la ventana previa de SEQ_LENGTH pasos completa (t >= split_start + SEQ_LENGTH)
-      - el origen t cae dentro del split [split_start, split_end)
-      - existe el target y(t+h) dentro del dataframe completo (t+h <= total_len - 1)
-    Replica la convencion de la TCN: el target puede caer fuera del split
-    (en la frontera entre splits) mientras siga existiendo en el df.
-    Conteo esperado test (split [936669, 1101964), N=1101964):
-      H=1 -> 165223 ; H=3 -> 165221 ; H=6 -> 165218 (igual a local_eval_metrics)."""
+    """Absolute indices `t` such that:
+      - the full previous `SEQ_LENGTH`-step window exists (`t >= split_start + SEQ_LENGTH`)
+      - the origin `t` falls inside split `[split_start, split_end)`
+      - the target `y(t+h)` exists inside the full dataframe (`t+h <= total_len - 1`)
+    Replicates the TCN convention: the target may fall outside the split
+    (at the split boundary) as long as it still exists in the dataframe.
+    Expected test counts (split `[936669, 1101964)`, `N=1101964`):
+      `H=1 -> 165223 ; H=3 -> 165221 ; H=6 -> 165218` (same as `local_eval_metrics`)."""
     first = split_start + SEQ_LENGTH
     last_in_split = split_end - 1
     last_by_target = total_len - 1 - horizon
@@ -173,8 +173,8 @@ def aligned_indices(
 
 
 def lag_matrix(series: np.ndarray, lags: int) -> np.ndarray:
-    """Devuelve una matriz (n, lags) con columnas [y(t), y(t-1), ..., y(t-lags+1)].
-    Las primeras lags-1 filas quedan con NaN."""
+    """Returns a matrix `(n, lags)` with columns `[y(t), y(t-1), ..., y(t-lags+1)]`.
+    The first `lags-1` rows remain NaN."""
     n = len(series)
     out = np.full((n, lags), np.nan, dtype=float)
     for k in range(lags):
@@ -196,7 +196,7 @@ def baseline_ar1_analytic(
     idx_test: np.ndarray,
     horizon: int,
 ) -> Tuple[np.ndarray, np.ndarray, float, float]:
-    """AR(1) analitico: rho por correlacion Pearson en train."""
+    """Analytical AR(1): `rho` from Pearson correlation on train."""
     y_full = df[TARGET_COL].to_numpy()
     y_train_t = y_full[idx_train]
     y_train_th = y_full[idx_train + horizon]
@@ -216,11 +216,11 @@ def baseline_ar_k(
     horizon: int,
     k: int,
 ) -> np.ndarray:
-    """AR(k) via regresion lineal."""
+    """AR(k) via linear regression."""
     y_full = df[TARGET_COL].to_numpy()
-    # Construir matriz de lags sobre toda la serie, luego seleccionar filas validas.
+    # Build the lag matrix over the whole series, then select valid rows.
     lags = lag_matrix(y_full, k)
-    # Filtrar train/test a filas donde no haya NaN en lags (k-1 primeras de todo el dataset).
+    # Filter train/test to rows without NaN in lags (the first `k-1` rows of the full dataset).
     idx_train_f = idx_train[idx_train >= k - 1]
     idx_test_f = idx_test[idx_test >= k - 1]
     X_train = lags[idx_train_f]
@@ -229,10 +229,10 @@ def baseline_ar_k(
     reg = LinearRegression()
     reg.fit(X_train, y_train)
     y_hat_test_f = reg.predict(X_test)
-    # Reindexar a la longitud completa de idx_test (deberia coincidir porque idx_test
-    # arranca en split_start + SEQ_LENGTH + horizon - 1 >> k).
+    # Reindex to the full length of `idx_test` (it should match because `idx_test`
+    # starts at `split_start + SEQ_LENGTH + horizon - 1 >> k`).
     y_hat = np.full(len(idx_test), np.nan)
-    # map idx_test -> posicion
+    # map idx_test -> position
     pos = {v: i for i, v in enumerate(idx_test)}
     for i, ix in enumerate(idx_test_f):
         y_hat[pos[ix]] = y_hat_test_f[i]
@@ -281,8 +281,8 @@ def baseline_rf(
 ) -> Tuple[np.ndarray, float, int]:
     X = df[features].to_numpy()
     y = df[TARGET_COL].to_numpy()
-    # Subsample cronologico estratificado: tomamos subsample filas espaciadas
-    # uniformemente en el train para preservar cobertura temporal.
+    # Stratified chronological subsample: take `subsample` rows evenly spaced
+    # across train to preserve temporal coverage.
     if len(idx_train) > subsample:
         sel = np.linspace(0, len(idx_train) - 1, subsample).astype(int)
         idx_train_sub = idx_train[sel]
@@ -297,11 +297,11 @@ def baseline_rf(
 
 
 # ---------------------------------------------------------------------------
-# Orquestacion
+# Orchestration
 # ---------------------------------------------------------------------------
 def run_horizon(df: pd.DataFrame, horizon: int) -> Dict[str, object]:
-    """Evalua todos los baselines para un horizonte concreto."""
-    print(f"\n=== Horizonte h={horizon} ===")
+    """Evaluates all baselines for a specific horizon."""
+    print(f"\n=== Horizon h={horizon} ===")
     idx_train = aligned_indices(0, IDX_TRAIN_END, horizon, len(df))
     idx_val = aligned_indices(IDX_TRAIN_END, IDX_VAL_END, horizon, len(df))
     idx_test = aligned_indices(IDX_VAL_END, len(df), horizon, len(df))
@@ -326,8 +326,8 @@ def run_horizon(df: pd.DataFrame, horizon: int) -> Dict[str, object]:
     y_hat = baseline_naive(df, idx_test, horizon)
     results["baselines"]["naive"] = compute_metrics(y_true_test, y_hat)
 
-    # (b) AR(1) analitico con y sin termino constante
-    print("  [b] AR(1) analitico...")
+    # (b) Analytical AR(1) with and without constant term
+    print("  [b] AR(1) analytic...")
     yh_c, yh_nc, rho, mean_tr = baseline_ar1_analytic(df, idx_train, idx_test, horizon)
     m = compute_metrics(y_true_test, yh_c)
     m["rho"] = rho
@@ -345,13 +345,13 @@ def run_horizon(df: pd.DataFrame, horizon: int) -> Dict[str, object]:
     y_hat = baseline_ar_k(df, idx_train, idx_test, horizon, k=12)
     results["baselines"]["ar12"] = compute_metrics(y_true_test, y_hat)
 
-    # (e) Predictor fisico
-    print("  [e] Fisico (rain_sum_60m + api_dynamic)...")
+    # (e) Physical predictor
+    print("  [e] Physical (rain_sum_60m + api_dynamic)...")
     y_hat = baseline_physical(df, idx_train, idx_test, horizon)
     results["baselines"]["physical_linear"] = compute_metrics(y_true_test, y_hat)
 
-    # (f) XGBoost 20 features (sin delta_flow)
-    print("  [f] XGBoost 20 features (sin delta_flow)...")
+    # (f) XGBoost 20 features (without delta_flow)
+    print("  [f] XGBoost 20 features (without delta_flow)...")
     y_hat, t_fit = baseline_xgb(df, idx_train, idx_test, horizon, FEATURES_20, XGB_PARAMS)
     m = compute_metrics(y_true_test, y_hat)
     m["fit_seconds"] = t_fit
@@ -371,8 +371,8 @@ def run_horizon(df: pd.DataFrame, horizon: int) -> Dict[str, object]:
     results["baselines"]["rf_20"] = m
     print(f"     NSE={m['nse']:.4f}  t_fit={t_fit:.1f}s")
 
-    # (h) XGBoost 22 features (con delta_flow) - CRITICO
-    print("  [h] XGBoost 22 features (con delta_flow)...")
+    # (h) XGBoost 22 features (with delta_flow) - CRITICAL
+    print("  [h] XGBoost 22 features (with delta_flow)...")
     y_hat, t_fit = baseline_xgb(df, idx_train, idx_test, horizon, FEATURES_22, XGB_PARAMS)
     m = compute_metrics(y_true_test, y_hat)
     m["fit_seconds"] = t_fit
@@ -384,25 +384,25 @@ def run_horizon(df: pd.DataFrame, horizon: int) -> Dict[str, object]:
 
 
 def format_md_table(all_results: Dict[int, Dict[str, object]], tcn_ref: Dict) -> str:
-    """Tabla comparativa por horizonte."""
+    """Comparative table by horizon."""
     lines: List[str] = []
-    lines.append("# S2 - Baselines rigurosos\n")
+    lines.append("# S2 - Rigorous baselines\n")
     lines.append(
-        "Bateria de baselines clasicos / ML tabular entrenados sobre el mismo split "
-        "cronologico 70/15/15 y los mismos indices de test que la TCN "
-        "(`seq_length=72`, `horizon h`). Objetivo: contextualizar la ganancia real "
-        "del TwoStageTCN v1 y diagnosticar el peso del atajo `delta_flow`.\n"
+        "Battery of classical baselines / tabular ML models trained on the same "
+        "chronological 70/15/15 split and the same test indices as the TCN "
+        "(`seq_length=72`, `horizon h`). Objective: contextualize the real gain "
+        "of TwoStageTCN v1 and diagnose the weight of the `delta_flow` shortcut.\n"
     )
-    lines.append("## Metodologia\n")
+    lines.append("## Methodology\n")
     lines.append(
         "- **Split**: train `iloc[:771374]` (hasta 2022-12-11), val `[771374:936669]`, "
         "test `[936669:]` (hasta 2026-01-31).\n"
-        "- **Ventana de evaluacion**: indices con ventana previa de 72 pasos completa "
+        "- **Evaluation window**: indices with the full previous 72-step window "
         "y `y(t+h)` disponible (mismos indices que consumiria la TCN).\n"
         "- **Target**: `stormflow_mgd(t+h)`.\n"
-        "- **Sin tuning**: hiperparametros fijos definidos en `s2_baselines.py`.\n"
+        "- **No tuning**: fixed hyperparameters defined in `s2_baselines.py`.\n"
     )
-    lines.append("## Dimensiones por horizonte\n")
+    lines.append("## Dimensions by horizon\n")
     lines.append("| h | n_train | n_val | n_test | primer ts test | ultimo ts test |")
     lines.append("|---|--------:|------:|-------:|----------------|----------------|")
     for h in HORIZONS:
@@ -413,12 +413,12 @@ def format_md_table(all_results: Dict[int, Dict[str, object]], tcn_ref: Dict) ->
         )
     lines.append("")
 
-    # Tabla principal por horizonte
+    # Main table by horizon
     for h in HORIZONS:
-        lines.append(f"## Horizonte h={h}\n")
+        lines.append(f"## Horizon h={h}\n")
         lines.append("| Baseline | NSE | RMSE | MAE | ErrPico % | Peak pred | N features | Notas |")
         lines.append("|---|---:|---:|---:|---:|---:|---:|---|")
-        # TCN v1 (referencia)
+        # TCN v1 (reference)
         key = f"H{h}_sinSF"
         if key in tcn_ref:
             g = tcn_ref[key]["global"]
@@ -436,15 +436,15 @@ def format_md_table(all_results: Dict[int, Dict[str, object]], tcn_ref: Dict) ->
             )
         # Baselines S2
         order = [
-            ("naive",           "Naive persistencia y(t)"),
-            ("ar1_analytic",    "AR(1) analitico (rho + const)"),
-            ("ar1_noconst",     "AR(1) analitico (sin const)"),
-            ("ar5",             "AR(5) lineal"),
-            ("ar12",            "AR(12) lineal"),
-            ("physical_linear", "Lineal fisico (rain_60m+API)"),
-            ("xgb_20",          "XGBoost 20 feats (sin delta_flow)"),
+            ("naive",           "Naive persistence y(t)"),
+            ("ar1_analytic",    "AR(1) analytic (rho + const)"),
+            ("ar1_noconst",     "AR(1) analytic (without const)"),
+            ("ar5",             "AR(5) linear"),
+            ("ar12",            "AR(12) linear"),
+            ("physical_linear", "Physical linear (rain_60m+API)"),
+            ("xgb_20",          "XGBoost 20 feats (without delta_flow)"),
             ("rf_20",           "RandomForest 20 feats"),
-            ("xgb_22",          "XGBoost 22 feats (con delta_flow)"),
+            ("xgb_22",          "XGBoost 22 feats (with delta_flow)"),
         ]
         bl = all_results[h]["baselines"]
         for k, label in order:
@@ -463,11 +463,11 @@ def format_md_table(all_results: Dict[int, Dict[str, object]], tcn_ref: Dict) ->
             )
         lines.append("")
 
-    # Bias por bucket (solo H=1)
-    lines.append("## Bias por bucket (H=1)\n")
+    # Bias by bucket (H=1 only)
+    lines.append("## Bias by bucket (H=1)\n")
     lines.append(
-        "`bias = mean(y_pred - y_true)` dentro de cada rango de `y_true` (MGD). "
-        "Negativo = subestima, positivo = sobrestima.\n"
+        "`bias = mean(y_pred - y_true)` inside each `y_true` range (MGD). "
+        "Negative = underestimation, positive = overestimation.\n"
     )
     buckets_names = [b[0] for b in BUCKETS]
     lines.append("| Baseline | " + " | ".join(buckets_names) + " |")
@@ -481,10 +481,10 @@ def format_md_table(all_results: Dict[int, Dict[str, object]], tcn_ref: Dict) ->
     bl = all_results[1]["baselines"]
     for k, label in [
         ("naive", "Naive"),
-        ("ar1_analytic", "AR(1) analitico"),
+        ("ar1_analytic", "AR(1) analytic"),
         ("ar5", "AR(5)"),
         ("ar12", "AR(12)"),
-        ("physical_linear", "Fisico lineal"),
+        ("physical_linear", "Physical linear"),
         ("xgb_20", "XGB-20"),
         ("rf_20", "RF-20"),
         ("xgb_22", "XGB-22"),
@@ -497,11 +497,11 @@ def format_md_table(all_results: Dict[int, Dict[str, object]], tcn_ref: Dict) ->
         lines.append("| " + " | ".join(row) + " |")
     lines.append("")
 
-    # NSE por bucket (H=1)
-    lines.append("## NSE por bucket (H=1)\n")
+    # NSE by bucket (H=1)
+    lines.append("## NSE by bucket (H=1)\n")
     lines.append(
-        "NSE local dentro del bucket. NSE<0 indica que el modelo es peor que "
-        "predecir la media del bucket.\n"
+        "Local NSE inside the bucket. `NSE<0` indicates that the model is worse than "
+        "predicting the bucket mean.\n"
     )
     lines.append("| Baseline | " + " | ".join(buckets_names) + " |")
     lines.append("|---|" + "|".join(["---:"] * len(buckets_names)) + "|")
@@ -516,7 +516,7 @@ def format_md_table(all_results: Dict[int, Dict[str, object]], tcn_ref: Dict) ->
         ("ar1_analytic", "AR(1)"),
         ("ar5", "AR(5)"),
         ("ar12", "AR(12)"),
-        ("physical_linear", "Fisico"),
+        ("physical_linear", "Physical"),
         ("xgb_20", "XGB-20"),
         ("rf_20", "RF-20"),
         ("xgb_22", "XGB-22"),
@@ -551,11 +551,11 @@ def build_verdict(all_results: Dict[int, Dict[str, object]], tcn_ref: Dict) -> s
     delta_tcn_vs_xgb22 = nse_tcn_h1 - nse_xgb22_h1
 
     lines: List[str] = []
-    lines.append("## Veredicto\n")
+    lines.append("## Verdict\n")
     lines.append(
-        "Respuestas directas a las preguntas clave del diagnostico. "
-        "Todos los numeros se refieren al test alineado (ventana de 72 pasos), "
-        "sin tuning ni early stopping, y al target `stormflow_mgd(t+h)`.\n"
+        "Direct answers to the key diagnostic questions. "
+        "All numbers refer to the aligned test set (72-step window), "
+        "without tuning or early stopping, and to the target `stormflow_mgd(t+h)`.\n"
     )
 
     # P1
@@ -563,47 +563,47 @@ def build_verdict(all_results: Dict[int, Dict[str, object]], tcn_ref: Dict) -> s
         f"### 1. XGBoost-20 vs TCN v1 (H=1)\n"
         f"- NSE XGB-20 = **{nse_xgb20_h1:.4f}**\n"
         f"- NSE TCN v1 sinSF = **{nse_tcn_h1:.4f}**\n"
-        f"- Diferencia TCN - XGB-20 = **{delta_tcn_vs_xgb20:+.4f}** NSE.\n"
+        f"- Difference TCN - XGB-20 = **{delta_tcn_vs_xgb20:+.4f}** NSE.\n"
     )
     if delta_tcn_vs_xgb20 >= 0.02:
         lines.append(
-            "Interpretacion: la TCN **si aporta** algo de valor arquitectonico sobre "
-            "XGBoost con las mismas 20 features (sin el atajo delta_flow), aunque "
-            "la ganancia es modesta. Habra que ver si compensa la complejidad.\n"
+            "Interpretation: the TCN **does add** some architectural value over "
+            "XGBoost with the same 20 features (without the `delta_flow` shortcut), although "
+            "the gain is modest. We still need to assess whether it justifies the added complexity.\n"
         )
     elif abs(delta_tcn_vs_xgb20) < 0.02:
         lines.append(
-            "Interpretacion: XGBoost-20 **empata** con el TCN v1. La arquitectura "
-            "temporal (convoluciones causales, backbone compartido, two-stage) "
-            "no esta aportando valor medible frente a un GBM tabular con las "
-            "mismas features sin el atajo.\n"
+            "Interpretation: XGBoost-20 **ties** TCN v1. The temporal architecture "
+            "(causal convolutions, shared backbone, two-stage) "
+            "is not adding measurable value relative to a tabular GBM with the "
+            "same features and without the shortcut.\n"
         )
     else:
         lines.append(
-            "Interpretacion: XGBoost-20 **supera** al TCN v1. La TCN no esta "
-            "extrayendo informacion util de la dinamica temporal mas alla de lo "
-            "que captura XGBoost con las features agregadas (rain_sum_*, api_dynamic, "
-            "delta_rain_*). Toda la ganancia aparente del TCN venia del atajo.\n"
+            "Interpretation: XGBoost-20 **outperforms** TCN v1. The TCN is not "
+            "extracting useful information from the temporal dynamics beyond what "
+            "XGBoost captures with the aggregated features (`rain_sum_*`, `api_dynamic`, "
+            "`delta_rain_*`). All apparent TCN gains were coming from the shortcut.\n"
         )
 
     # P2
     lines.append(
-        f"### 2. Peso real del atajo `delta_flow`\n"
-        f"- NSE XGB-22 (con delta_flow) = **{nse_xgb22_h1:.4f}**\n"
-        f"- NSE XGB-20 (sin delta_flow) = **{nse_xgb20_h1:.4f}**\n"
-        f"- Contribucion atajo = **{delta_shortcut:+.4f}** NSE.\n"
-        f"- NSE XGB-22 - TCN v1 = **{delta_tcn_vs_xgb22:+.4f}** (negativo = XGB-22 gana).\n"
+        f"### 2. Real weight of the `delta_flow` shortcut\n"
+        f"- NSE XGB-22 (with `delta_flow`) = **{nse_xgb22_h1:.4f}**\n"
+        f"- NSE XGB-20 (without `delta_flow`) = **{nse_xgb20_h1:.4f}**\n"
+        f"- Shortcut contribution = **{delta_shortcut:+.4f}** NSE.\n"
+        f"- NSE XGB-22 - TCN v1 = **{delta_tcn_vs_xgb22:+.4f}** (negative = XGB-22 wins).\n"
     )
     if delta_shortcut >= 0.03:
         lines.append(
-            "Interpretacion: el atajo `delta_flow_*` aporta una ganancia claramente "
-            "mensurable tambien en XGBoost. Confirma el hallazgo de iter16: el "
-            "salto del TCN sobre naive venia en gran parte de esas dos features.\n"
+            "Interpretation: the `delta_flow_*` shortcut contributes a clearly "
+            "measurable gain in XGBoost as well. This confirms the iter16 finding: the "
+            "TCN jump over the naive baseline came largely from those two features.\n"
         )
     else:
         lines.append(
-            "Interpretacion: `delta_flow_*` aporta poco en XGBoost (<0.03 NSE). "
-            "El atajo puede ser mas util al TCN por como lo combina internamente.\n"
+            "Interpretation: `delta_flow_*` adds little in XGBoost (<0.03 NSE). "
+            "The shortcut may be more useful to the TCN because of how it combines it internally.\n"
         )
 
     # P3
@@ -614,63 +614,63 @@ def build_verdict(all_results: Dict[int, Dict[str, object]], tcn_ref: Dict) -> s
     )
     if delta_xgb_vs_naive < 0.02:
         lines.append(
-            "Interpretacion: XGBoost-20 **apenas mejora** sobre persistencia. Las "
-            "features de lluvia estan siendo ignoradas (o no aportan senal a H=1).\n"
+            "Interpretation: XGBoost-20 **barely improves** over persistence. The "
+            "rainfall features are being ignored (or they do not add signal at H=1).\n"
         )
     else:
         lines.append(
-            "Interpretacion: XGBoost-20 **si usa** las features de lluvia/API. "
-            "La senal exogena tiene valor predictivo.\n"
+            "Interpretation: XGBoost-20 **does use** the rainfall/API features. "
+            "The exogenous signal has predictive value.\n"
         )
 
     # P4
     lines.append(
-        f"### 4. Predictor fisico (2 features) como sanity check (H=1)\n"
-        f"- NSE lineal(rain_sum_60m + api_dynamic) = **{nse_phys_h1:.4f}**\n"
+        f"### 4. Physical predictor (2 features) as sanity check (H=1)\n"
+        f"- NSE linear(`rain_sum_60m + api_dynamic`) = **{nse_phys_h1:.4f}**\n"
     )
     if nse_phys_h1 >= 0.3:
         lines.append(
-            "Interpretacion: con solo dos features fisicas se alcanza un NSE >=0.3. "
-            "Existe senal lluvia->stormflow aprendible, y un modelo simple ya la captura "
-            "parcialmente.\n"
+            "Interpretation: with only two physical features, NSE reaches >=0.3. "
+            "There is learnable rainfall->stormflow signal, and a simple model already captures "
+            "part of it.\n"
         )
     elif nse_phys_h1 > 0:
         lines.append(
-            "Interpretacion: NSE positivo pero modesto. La relacion lluvia->stormflow "
-            "es no lineal y necesita mas features / modelo mas expresivo para "
-            "extraerla bien.\n"
+            "Interpretation: NSE is positive but modest. The rainfall->stormflow relationship "
+            "is nonlinear and needs more features / a more expressive model to "
+            "capture it well.\n"
         )
     else:
         lines.append(
-            "Interpretacion: NSE negativo o cero. La combinacion lineal de "
-            "rain_sum_60m + api_dynamic no basta; el problema tiene no-linealidades "
-            "fuertes o el horizonte confunde las escalas.\n"
+            "Interpretation: NSE is negative or zero. The linear combination of "
+            "`rain_sum_60m + api_dynamic` is not enough; the problem has strong nonlinearities "
+            "or the horizon confounds the scales.\n"
         )
 
-    # P5: que horizonte tiene sentido
+    # P5: which horizon makes sense
     def best_nse(res):
         return max((v["nse"] for v in res.values() if isinstance(v, dict) and "nse" in v))
     best_h1 = best_nse(r1)
     best_h3 = best_nse(r3)
     best_h6 = best_nse(r6)
     lines.append(
-        f"### 5. Horizonte operativo\n"
-        f"- Mejor NSE baseline a H=1: **{best_h1:.4f}**\n"
-        f"- Mejor NSE baseline a H=3: **{best_h3:.4f}**\n"
-        f"- Mejor NSE baseline a H=6: **{best_h6:.4f}**\n"
+        f"### 5. Operational horizon\n"
+        f"- Best baseline NSE at H=1: **{best_h1:.4f}**\n"
+        f"- Best baseline NSE at H=3: **{best_h3:.4f}**\n"
+        f"- Best baseline NSE at H=6: **{best_h6:.4f}**\n"
     )
     if best_h6 < 0.3:
         lines.append(
-            "Interpretacion: a H=6 ningun baseline alcanza NSE razonable. La senal "
-            "predictiva disponible se degrada rapido con el horizonte, "
-            "consistente con el lag efectivo del sistema (memoria corta). "
-            "Trabajar en H=1 (30 min) y, si el TFM lo exige, H=3 (15 min) "
-            "como maximo operativo.\n"
+            "Interpretation: at H=6 no baseline reaches a reasonable NSE. The available "
+            "predictive signal degrades quickly with the horizon, "
+            "consistent with the system's effective lag (short memory). "
+            "Work at H=1 (30 min) and, if the TFM requires it, H=3 (15 min) "
+            "as the maximum operational horizon.\n"
         )
     else:
         lines.append(
-            "Interpretacion: hay margen para horizontes mas largos. Evaluar H>=3 "
-            "como objetivo operativo.\n"
+            "Interpretation: there is room for longer horizons. Evaluate H>=3 "
+            "as an operational target.\n"
         )
 
     return "\n".join(lines)
@@ -680,7 +680,7 @@ def build_verdict(all_results: Dict[int, Dict[str, object]], tcn_ref: Dict) -> s
 # Main
 # ---------------------------------------------------------------------------
 def main() -> None:
-    print(f"Cargando parquet: {PARQUET_PATH}")
+    print(f"Loading parquet: {PARQUET_PATH}")
     df = pd.read_parquet(PARQUET_PATH)
     print(f"  shape={df.shape}")
 
@@ -688,12 +688,12 @@ def main() -> None:
     for h in HORIZONS:
         all_results[h] = run_horizon(df, h)
 
-    # Cargar metricas del TCN v1 para comparacion
+    # Load TCN v1 metrics for comparison
     tcn_ref_path = ROOT / "outputs" / "data_analysis" / "local_eval_metrics.json"
     with open(tcn_ref_path, "r", encoding="utf-8") as f:
         tcn_ref = json.load(f)
 
-    # Metadatos globales
+    # Global metadata
     meta = {
         "split": {
             "train_end_idx": IDX_TRAIN_END,
@@ -717,7 +717,7 @@ def main() -> None:
 
     json_out = {"meta": meta, "results": all_results}
     json_path = OUT_DIR / "S2_baselines.json"
-    # Sanear inf/NaN para JSON
+    # Clean inf/NaN for JSON
     def _clean(o):
         if isinstance(o, dict):
             return {k: _clean(v) for k, v in o.items()}
@@ -729,14 +729,14 @@ def main() -> None:
         return o
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(_clean(json_out), f, indent=2, ensure_ascii=False)
-    print(f"\nEscrito: {json_path}")
+    print(f"\nWritten: {json_path}")
 
     md_body = format_md_table(all_results, tcn_ref)
     md_verdict = build_verdict(all_results, tcn_ref)
     md_path = OUT_DIR / "S2_baselines.md"
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(md_body + "\n" + md_verdict + "\n")
-    print(f"Escrito: {md_path}")
+    print(f"Written: {md_path}")
 
 
 if __name__ == "__main__":

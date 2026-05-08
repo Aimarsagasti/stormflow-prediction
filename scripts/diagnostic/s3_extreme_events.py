@@ -1,16 +1,16 @@
 """
-S3 - Analisis profundo de los 59 eventos extremos (>=50 MGD) del test.
+S3 - Deep analysis of the 59 extreme test events (>=50 MGD).
 
-Objetivo: diseccionar uno a uno los 59 picos extremos del test set para entender
-que los distingue, que patron temporal tienen, y si hay subgrupos predecibles vs
-no predecibles. Resolver la contradiccion documental sobre extremos sin lluvia
-(doc vieja: 15/59 sin lluvia, iter16: 0/59 sin lluvia).
+Objective: dissect the 59 extreme peaks in the test set one by one to understand
+what distinguishes them, what temporal pattern they follow, and whether there are
+predictable vs. non-predictable subgroups. Resolve the documentation contradiction
+about extremes without rainfall (old doc: 15/59 without rainfall, iter16: 0/59 without rainfall).
 
-Artefactos:
-  - outputs/diagnostic/S3_extreme_events.json
-  - outputs/diagnostic/S3_extreme_events.md
+Artifacts:
+- outputs/diagnostic/S3_extreme_events.json
+- outputs/diagnostic/S3_extreme_events.md
 
-Solo se usan: pandas, numpy, sklearn, torch (para cargar el TCN v1).
+Only uses: pandas, numpy, sklearn, torch (to load TCN v1).
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from sklearn.preprocessing import StandardScaler
 
 import torch
 
-# Inyectar raiz del proyecto al sys.path para poder importar src.*
+# Inject the project root into `sys.path` so `src.*` can be imported
 ROOT = Path("C:/Dev/TFM")
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -36,7 +36,7 @@ from src.models.tcn import TwoStageTCN  # type: ignore
 
 
 # ---------------------------------------------------------------------------
-# Configuracion
+# Configuration
 # ---------------------------------------------------------------------------
 PARQUET_PATH = ROOT / "outputs" / "cache" / "df_with_features.parquet"
 WEIGHTS_DIR = ROOT / "MC-CL-005" / "Pesos 13-04-2026"
@@ -44,21 +44,21 @@ WEIGHTS_STEM = "modelo_H1_sinSF"
 OUT_DIR = ROOT / "outputs" / "diagnostic"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# Split cronologico (identicos indices que S2 y pipeline oficial).
+# Chronological split (same indices as S2 and the official pipeline).
 IDX_TRAIN_END = 771374
 IDX_VAL_END = 936669  # test = [936669:]
 
 SEQ_LENGTH = 72
 HORIZON = 1
 EXTREME_THR = 50.0  # MGD
-EVENT_GAP_STEPS = 48  # 4 horas (48 * 5 min) para agrupar en eventos fisicos
+EVENT_GAP_STEPS = 48  # 4 hours (48 * 5 min) to group physical events
 
 TARGET_COL = "stormflow_mgd"
 DEVICE = "cpu"
 
 
 # ---------------------------------------------------------------------------
-# Utilidades
+# Utilities
 # ---------------------------------------------------------------------------
 def nse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     if len(y_true) == 0:
@@ -82,7 +82,7 @@ def mae(y_true: np.ndarray, y_pred: np.ndarray) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Carga y localizacion de extremos
+# Loading and locating extremes
 # ---------------------------------------------------------------------------
 def load_df() -> pd.DataFrame:
     df = pd.read_parquet(PARQUET_PATH)
@@ -91,19 +91,19 @@ def load_df() -> pd.DataFrame:
 
 
 def find_extremes(df: pd.DataFrame) -> List[int]:
-    """Devuelve indices absolutos del df (sobre la serie completa) con stormflow>=50
-    dentro del split test [IDX_VAL_END:]."""
+    """Returns absolute indices in the dataframe (over the full series) with `stormflow>=50`
+    inside the test split `[IDX_VAL_END:]`."""
     test_mask = np.zeros(len(df), dtype=bool)
     test_mask[IDX_VAL_END:] = True
     extreme_mask = (df[TARGET_COL].to_numpy() >= EXTREME_THR) & test_mask
     idx_abs = np.where(extreme_mask)[0].tolist()
-    print(f"[find] n_extremos (muestras>=50 en test) = {len(idx_abs)}")
+    print(f"[find] n_extremes (samples>=50 in test) = {len(idx_abs)}")
     return idx_abs
 
 
 def group_into_physical_events(idx_abs: List[int], gap_steps: int) -> List[List[int]]:
-    """Agrupa muestras consecutivas en eventos fisicos. Dos muestras estan en el
-    mismo evento si estan separadas por <=gap_steps pasos."""
+    """Groups consecutive samples into physical events. Two samples are in the
+    same event if they are separated by `<= gap_steps` steps."""
     if not idx_abs:
         return []
     events: List[List[int]] = [[idx_abs[0]]]
@@ -116,36 +116,36 @@ def group_into_physical_events(idx_abs: List[int], gap_steps: int) -> List[List[
 
 
 # ---------------------------------------------------------------------------
-# Caracterizacion por muestra (t)
+# Per-sample characterization (t)
 # ---------------------------------------------------------------------------
 def sample_characterization(df: pd.DataFrame, t_abs: int) -> Dict[str, float]:
-    """Extrae features agregadas de la ventana [t-72, t-1] para caracterizar el
-    contexto del pico en t_abs."""
-    win = df.iloc[t_abs - SEQ_LENGTH : t_abs]  # 72 filas previas
+    """Extracts aggregated features from the window `[t-72, t-1]` to characterize
+    the peak context at `t_abs`."""
+    win = df.iloc[t_abs - SEQ_LENGTH : t_abs]  # 72 previous rows
     rain_window = win["rain_in"].to_numpy()
 
-    # lag pico-lluvia: distancia (en minutos) desde el pico de lluvia mas reciente
-    # hasta el pico de stormflow (que ocurre en t_abs).
+    # peak-rainfall lag: distance (in minutes) from the most recent rainfall peak
+    # to the stormflow peak (which occurs at `t_abs`).
     if rain_window.max() > 0:
-        # Indice relativo (0..71) del pico de lluvia mas reciente dentro de la ventana.
-        # Si hay varios empates, cogemos el mas cercano a t (max idx).
+        # Relative index (0..71) of the most recent rainfall peak inside the window.
+        # If there are ties, take the one closest to `t` (max idx).
         max_val = rain_window.max()
         rel_idx = int(np.where(rain_window == max_val)[0].max())
-        # Distancia en pasos desde ese pico hasta t_abs (t_abs no pertenece a la ventana).
-        # window pos 0 corresponde a t-72; pos rel_idx corresponde a t-(72-rel_idx).
+        # Distance in steps from that peak to `t_abs` (`t_abs` is not part of the window).
+        # Window position 0 corresponds to `t-72`; position `rel_idx` corresponds to `t-(72-rel_idx)`.
         dist_steps = SEQ_LENGTH - rel_idx
-        lag_pico_lluvia = dist_steps * 5.0  # minutos
+        lag_pico_lluvia = dist_steps * 5.0  # minutes
     else:
         lag_pico_lluvia = float("nan")
 
     rain_intensity_max = float(rain_window.max())
     rain_total_window = float(rain_window.sum())
 
-    # Duracion de lluvia: numero maximo de muestras consecutivas con rain_in > 0.
+    # Rainfall duration: maximum number of consecutive samples with `rain_in > 0`.
     rain_duration = _max_consecutive_positive(rain_window)
 
-    # api_dynamic en t (momento del pico; justo "antes" en sentido predictivo es t-1,
-    # pero usamos t para describir el estado del sistema en el pico).
+    # `api_dynamic` at `t` (moment of the peak; strictly "before" in the predictive sense is `t-1`,
+    # but we use `t` to describe the system state at the peak).
     api_pico = float(df.iloc[t_abs]["api_dynamic"])
     temp_daily_pico = float(df.iloc[t_abs]["temp_daily_f"])
     month = int(df.iloc[t_abs]["timestamp"].month)
@@ -154,14 +154,14 @@ def sample_characterization(df: pd.DataFrame, t_abs: int) -> Dict[str, float]:
     stormflow_at_t_minus_72 = float(df.iloc[t_abs - 72][TARGET_COL])
     stormflow_at_t_minus_1 = float(df.iloc[t_abs - 1][TARGET_COL])
 
-    # Criterios de "sin lluvia":
+    # "No-rainfall" criteria:
     rain_sum_360m_t = float(df.iloc[t_abs]["rain_sum_360m"])
     rain_sum_60m_t = float(df.iloc[t_abs]["rain_sum_60m"])
-    # Criterio A (estricto 6h): rain_sum_360m(t) < 0.01 in
+    # Criterion A (strict 6h): `rain_sum_360m(t) < 0.01 in`
     no_rain_A = rain_sum_360m_t < 0.01
-    # Criterio B (1h): rain_sum_60m(t) < 0.01 in
+    # Criterion B (1h): `rain_sum_60m(t) < 0.01 in`
     no_rain_B = rain_sum_60m_t < 0.01
-    # Criterio C (window-72 total): sum(rain_in) en la ventana de input < 0.01
+    # Criterion C (window-72 total): `sum(rain_in)` in the input window `< 0.01`
     no_rain_C = rain_total_window < 0.01
 
     return {
@@ -184,7 +184,7 @@ def sample_characterization(df: pd.DataFrame, t_abs: int) -> Dict[str, float]:
 
 
 def _max_consecutive_positive(arr: np.ndarray) -> int:
-    """Numero maximo de muestras consecutivas con arr>0."""
+    """Maximum number of consecutive samples with `arr > 0`."""
     max_run = 0
     current = 0
     for v in arr:
@@ -198,7 +198,7 @@ def _max_consecutive_positive(arr: np.ndarray) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Carga del TCN v1 y prediccion por muestra
+# Loading TCN v1 and per-sample prediction
 # ---------------------------------------------------------------------------
 def load_tcn_and_norm() -> Tuple[TwoStageTCN, Dict]:
     weights_path = WEIGHTS_DIR / f"{WEIGHTS_STEM}_weights.pt"
@@ -216,15 +216,15 @@ def load_tcn_and_norm() -> Tuple[TwoStageTCN, Dict]:
     model = TwoStageTCN(n_features=len(features))
     model.load_state_dict(torch.load(weights_path, map_location=DEVICE))
     model.eval()
-    print("[tcn] pesos cargados correctamente")
+    print("[tcn] weights loaded successfully")
 
-    norm_params["feature_columns"] = features  # asegurar orden
+    norm_params["feature_columns"] = features  # ensure order
     return model, norm_params
 
 
 def prepare_normalized_df(df: pd.DataFrame, norm_params: Dict) -> pd.DataFrame:
-    """Aplica log1p + zscore a las columnas relevantes del df usando stats del
-    norm_params (stats de train del entrenamiento original)."""
+    """Applies `log1p + zscore` to the relevant dataframe columns using the stats from
+    `norm_params` (train stats from the original training)."""
     df_out = df.copy()
     log_cols = norm_params["log1p_columns"]
     for c in log_cols:
@@ -248,17 +248,17 @@ def predict_single(
     t_abs: int,
     threshold: float = 0.3,
 ) -> Tuple[float, float, float]:
-    """Predice y_pred(t_abs) a partir de la ventana normalizada [t_abs-72, t_abs-1]
-    (horizonte 1: el target es stormflow_mgd(t_abs)).
-    Devuelve (y_pred_mgd, cls_prob, reg_value_mgd_from_regressor)."""
+    """Predicts `y_pred(t_abs)` from the normalized window `[t_abs-72, t_abs-1]`
+    (horizon 1: the target is `stormflow_mgd(t_abs)`).
+    Returns `(y_pred_mgd, cls_prob, reg_value_mgd_from_regressor)`."""
     features = norm_params["feature_columns"]
     target_col = norm_params["target_col"]
     target_mean = norm_params["mean"][target_col]
     target_std = norm_params["std"][target_col]
 
-    # Ventana de input: [t_abs-72, t_abs-1] (horizon=1, el target es en t_abs).
-    # Nota: en train con horizon=1, x cubre [i, i+seq_len-1] y y = stormflow en i+seq_len+horizon-1.
-    # Aqui replicamos: target en t_abs, ventana de 72 pasos previos [t_abs-72, t_abs-1].
+    # Input window: `[t_abs-72, t_abs-1]` (`horizon=1`, the target is at `t_abs`).
+    # Note: in train with `horizon=1`, `x` covers `[i, i+seq_len-1]` and `y = stormflow` at `i+seq_len+horizon-1`.
+    # Here we replicate that: target at `t_abs`, window of the previous 72 steps `[t_abs-72, t_abs-1]`.
     win = df_norm.iloc[t_abs - SEQ_LENGTH : t_abs][features].to_numpy(dtype=np.float32)
     x = torch.from_numpy(win).unsqueeze(0)  # (1, 72, n_feat)
 
@@ -266,13 +266,13 @@ def predict_single(
         out = model(x)
         cls_prob = float(out["cls_prob"].item())
         reg_value_norm = float(out["reg_value"].item())
-        # Switch duro como en TwoStageTCN.predict
+        # Hard switch as in TwoStageTCN.predict
         if cls_prob >= threshold:
             y_pred_norm = reg_value_norm
         else:
             y_pred_norm = 0.0
 
-    # Desnormalizar (z-score inverso + expm1 si target esta en log1p_columns)
+    # Denormalize (inverse z-score + `expm1` if the target is in `log1p_columns`)
     def _denorm(v_norm: float) -> float:
         v = v_norm * target_std + target_mean
         if target_col in norm_params.get("log1p_columns", []):
@@ -299,15 +299,15 @@ CLUSTER_FEATS = [
 
 
 def run_clustering(records: List[Dict], k: int = 3, seed: int = 42) -> Tuple[np.ndarray, Dict]:
-    """Estandariza CLUSTER_FEATS y corre KMeans con k clusters. Devuelve labels
-    y diagnostico (centroides originales, inercia, n por cluster)."""
+    """Standardizes CLUSTER_FEATS and runs KMeans with k clusters. Returns labels
+    and diagnostics (original centroids, inertia, n per cluster)."""
     X = np.array([[r[f] if not (isinstance(r[f], float) and np.isnan(r[f])) else 0.0
                    for f in CLUSTER_FEATS] for r in records])
     scaler = StandardScaler()
     Xz = scaler.fit_transform(X)
     km = KMeans(n_clusters=k, random_state=seed, n_init=10)
     labels = km.fit_predict(Xz)
-    # Centros en escala original:
+    # Centers in the original scale:
     centers_z = km.cluster_centers_
     centers_orig = scaler.inverse_transform(centers_z)
     centers_by_cluster = {}
@@ -324,21 +324,21 @@ def run_clustering(records: List[Dict], k: int = 3, seed: int = 42) -> Tuple[np.
 
 
 def label_clusters_qualitatively(cluster_diag: Dict) -> Dict[int, str]:
-    """Asigna etiqueta cualitativa a cada cluster segun sus centros:
-       - convectivo: intensidad alta, duracion corta, lag corto.
-       - estratiforme: total alto, duracion larga, lag mayor.
-       - atipico/seco: lluvia baja o time_since_last_rain alto.
-    Heuristica simple basada en ranking de cada feature entre clusters.
+    """Assigns a qualitative label to each cluster according to its centers:
+       - convective: high intensity, short duration, short lag.
+       - stratiform: high total, long duration, longer lag.
+       - atypical/dry: low rainfall or high `time_since_last_rain`.
+    Simple heuristic based on the ranking of each feature across clusters.
     """
     centers = cluster_diag["centers_orig"]
     k = cluster_diag["k"]
-    # Construir rankings
+    # Build rankings
     ranks = {f: {} for f in CLUSTER_FEATS}
     for f in CLUSTER_FEATS:
         vals = [(c, centers[c][f]) for c in range(k)]
         vals.sort(key=lambda x: x[1])
         for rank, (c, _) in enumerate(vals):
-            ranks[f][c] = rank  # 0 = minimo, k-1 = maximo
+            ranks[f][c] = rank  # 0 = minimum, k-1 = maximum
 
     labels = {}
     for c in range(k):
@@ -348,15 +348,15 @@ def label_clusters_qualitatively(cluster_diag: Dict) -> Dict[int, str]:
         lag_rank = ranks["lag_pico_lluvia_min"][c]
         tslr_rank = ranks["time_since_last_rain_min"][c]
 
-        # Heuristica:
+        # Heuristic:
         if intensity_rank == k - 1 and duration_rank <= 1 and lag_rank <= 1:
-            labels[c] = "Convectivo (intenso, corto, lag pequeno)"
+            labels[c] = "Convective (intense, short, short lag)"
         elif total_rank == k - 1 and duration_rank == k - 1:
-            labels[c] = "Estratiforme (total alto, duracion larga)"
+            labels[c] = "Stratiform (high total, long duration)"
         elif tslr_rank == k - 1 or intensity_rank == 0:
-            labels[c] = "Atipico (lluvia escasa o antigua)"
+            labels[c] = "Atypical (scarce or old rainfall)"
         else:
-            labels[c] = "Mixto"
+            labels[c] = "Mixed"
     return labels
 
 
@@ -366,14 +366,14 @@ def label_clusters_qualitatively(cluster_diag: Dict) -> Dict[int, str]:
 def main() -> None:
     df = load_df()
 
-    # 1. Localizar extremos
+    # 1. Locate extremes
     idx_abs = find_extremes(df)
     events_fisicos = group_into_physical_events(idx_abs, EVENT_GAP_STEPS)
     n_fisicos = len(events_fisicos)
-    print(f"[events] n_samples_extremas={len(idx_abs)}  n_eventos_fisicos={n_fisicos}")
+    print(f"[events] n_extreme_samples={len(idx_abs)}  n_physical_events={n_fisicos}")
 
-    # 2. Caracterizacion por muestra (trabajaremos con los 59 picos individuales;
-    #    tambien reportamos el pico maximo por evento fisico).
+    # 2. Per-sample characterization (we will work with the 59 individual peaks;
+    #    we also report the maximum peak per physical event).
     records: List[Dict] = []
     for t in idx_abs:
         row = {
@@ -384,20 +384,20 @@ def main() -> None:
         row.update(sample_characterization(df, t))
         records.append(row)
 
-    # 3. Resolucion de la contradiccion "sin lluvia"
+    # 3. Resolution of the "no-rainfall" contradiction
     n_no_rain_A = sum(r["no_rain_A_360m"] for r in records)
     n_no_rain_B = sum(r["no_rain_B_60m"] for r in records)
     n_no_rain_C = sum(r["no_rain_C_window72"] for r in records)
-    print(f"[sin-lluvia] criterio A (rain_sum_360m<0.01): {n_no_rain_A}/59")
-    print(f"[sin-lluvia] criterio B (rain_sum_60m<0.01): {n_no_rain_B}/59")
-    print(f"[sin-lluvia] criterio C (window72 sum<0.01):  {n_no_rain_C}/59")
+    print(f"[no-rainfall] criterion A (rain_sum_360m<0.01): {n_no_rain_A}/59")
+    print(f"[no-rainfall] criterion B (rain_sum_60m<0.01): {n_no_rain_B}/59")
+    print(f"[no-rainfall] criterion C (window72 sum<0.01):  {n_no_rain_C}/59")
 
-    # 4. Carga del TCN v1 y prediccion por muestra
+    # 4. Load TCN v1 and predict per sample
     tcn_available = True
     try:
         model, norm_params = load_tcn_and_norm()
         df_norm = prepare_normalized_df(df, norm_params)
-        print("[tcn] df normalizado listo. Prediciendo los 59 extremos...")
+        print("[tcn] normalized dataframe ready. Predicting the 59 extremes...")
         for i, r in enumerate(records):
             t = r["t_abs"]
             y_pred, cls_prob, reg_val = predict_single(model, df_norm, norm_params, t)
@@ -405,7 +405,7 @@ def main() -> None:
             r["v1_cls_prob"] = cls_prob
             r["v1_reg_value_mgd"] = reg_val
     except Exception as exc:
-        print(f"[tcn] ERROR cargando o prediciendo con v1: {exc}")
+        print(f"[tcn] ERROR loading or predicting with v1: {exc}")
         tcn_available = False
         for r in records:
             r["y_pred_v1_mgd"] = float("nan")
@@ -426,13 +426,13 @@ def main() -> None:
             r["underestim_v1_pct"] = float("nan")
         r["underestim_naive_pct"] = (r["y_pred_naive_mgd"] - r["y_real_mgd"]) / r["y_real_mgd"] * 100.0
 
-    # 6. Clustering (k=3 por defecto, justificado: convectivo / estratiforme / atipico)
+    # 6. Clustering (`k=3` by default, justified as: convective / stratiform / atypical)
     labels, cluster_diag = run_clustering(records, k=3)
     for i, r in enumerate(records):
         r["cluster"] = int(labels[i])
     cluster_labels_qual = label_clusters_qualitatively(cluster_diag)
 
-    # 7. Metricas por cluster
+    # 7. Metrics by cluster
     cluster_metrics: Dict[int, Dict] = {}
     for c in range(cluster_diag["k"]):
         mask = np.array([r["cluster"] == c for r in records])
@@ -460,7 +460,7 @@ def main() -> None:
             "max_y_real": float(np.max(yr)),
         }
 
-    # 8. Hallazgos agregados globales (sobre los 59)
+    # 8. Global aggregated findings (over the 59)
     y_real_all = np.array([r["y_real_mgd"] for r in records])
     y_naive_all = np.array([r["y_pred_naive_mgd"] for r in records])
     if tcn_available:
@@ -479,9 +479,9 @@ def main() -> None:
         "mae_naive_59": mae(y_real_all, y_naive_all),
     }
 
-    # 9. Cota optimista: oraculo en el cluster con mejor comportamiento actual del v1
-    #    Suponemos oraculo sobre cluster mas predecible (mayor NSE_v1) y mantener
-    #    el rendimiento actual en el resto. Reconstruir NSE global bucket Extremo.
+    # 9. Optimistic bound: oracle in the cluster with the best current v1 behavior
+    #    We assume an oracle on the most predictable cluster (highest NSE_v1) and keep
+    #    the current performance on the rest. Reconstruct the global NSE for bucket Extremo.
     cota_optimista: Dict = {}
     if tcn_available:
         best_cluster = max(
@@ -491,7 +491,7 @@ def main() -> None:
         y_pred_oracle = y_v1_all.copy()
         for i, r in enumerate(records):
             if r["cluster"] == best_cluster:
-                y_pred_oracle[i] = r["y_real_mgd"]  # oraculo perfecto
+                y_pred_oracle[i] = r["y_real_mgd"]  # perfect oracle
         nse_oracle = nse(y_real_all, y_pred_oracle)
         cota_optimista = {
             "best_cluster_id": int(best_cluster),
@@ -503,11 +503,11 @@ def main() -> None:
         }
     else:
         cota_optimista = {
-            "note": "v1 no disponible; cota optimista no calculada",
+            "note": "v1 not available; optimistic bound not computed",
         }
 
-    # 10. Persistir JSON
-    # Definicion de event fisicos para el JSON
+    # 10. Save JSON
+    # Definition of physical events for the JSON
     events_json = []
     for ev_idx, ev in enumerate(events_fisicos):
         peak_max = max(ev, key=lambda t: float(df.iloc[t][TARGET_COL]))
@@ -570,7 +570,7 @@ def main() -> None:
     json_path = OUT_DIR / "S3_extreme_events.json"
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(_clean(output_json), f, indent=2, ensure_ascii=False)
-    print(f"\nEscrito: {json_path}")
+    print(f"\nWritten: {json_path}")
 
     # 11. Markdown
     md = build_markdown(
@@ -587,7 +587,7 @@ def main() -> None:
     md_path = OUT_DIR / "S3_extreme_events.md"
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(md)
-    print(f"Escrito: {md_path}")
+    print(f"Written: {md_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -605,27 +605,27 @@ def build_markdown(
     tcn_available: bool,
 ) -> str:
     lines: List[str] = []
-    lines.append("# S3 - Analisis de los 59 eventos extremos del test\n")
+    lines.append("# S3 - Analysis of the 59 extreme test events\n")
     lines.append(
-        "Diseccion uno a uno de los 59 picos con `stormflow_mgd >= 50 MGD` en el "
-        "test set (ventana cronologica 2024-07-07 -> 2026-01-31, `iloc[936669:]`). "
-        "Objetivo: identificar patrones, resolver la contradiccion documental sobre "
-        "extremos sin lluvia, y cuantificar que subgrupo es predecible.\n"
+        "One-by-one dissection of the 59 peaks with `stormflow_mgd >= 50 MGD` in the "
+        "test set (chronological window 2024-07-07 -> 2026-01-31, `iloc[936669:]`). "
+        "Objective: identify patterns, resolve the documentation contradiction about "
+        "extremes without rainfall, and quantify which subgroup is predictable.\n"
     )
 
-    # 1. Inventario
-    lines.append("## 1. Inventario\n")
+    # 1. Inventory
+    lines.append("## 1. Inventory\n")
     lines.append(
-        f"- **Muestras extremas** (stormflow>=50 MGD en test): **{len(records)}**.\n"
-        f"- **Eventos fisicos** (muestras agrupadas por gap <= {EVENT_GAP_STEPS} pasos = 4h): "
+        f"- **Extreme samples** (stormflow>=50 MGD in test): **{len(records)}**.\n"
+        f"- **Physical events** (samples grouped by gap <= {EVENT_GAP_STEPS} steps = 4h): "
         f"**{len(events_fisicos)}**.\n"
     )
     lines.append(
-        "Criterio de agrupacion: dos muestras consecutivas pertenecen al mismo evento si "
-        "estan separadas por <=48 pasos de 5 min (4 horas). Con este criterio, las 59 "
-        "muestras se agrupan en tormentas fisicas independientes (ver tabla).\n"
+        "Grouping criterion: two consecutive samples belong to the same event if "
+        "they are separated by <=48 steps of 5 min (4 hours). Under this criterion, the 59 "
+        "samples group into independent physical storms (see table).\n"
     )
-    lines.append("| event_id | ts_pico | n_samples | peak_mgd |")
+    lines.append("| event_id | peak_ts | n_samples | peak_mgd |")
     lines.append("|---:|---|---:|---:|")
     for i, ev in enumerate(events_fisicos):
         t_peak = max(ev, key=lambda t: records_index_by_t(records, t)["y_real_mgd"])
@@ -635,40 +635,40 @@ def build_markdown(
         )
     lines.append("")
 
-    # 2. Resolucion de la contradiccion sin lluvia
-    lines.append("## 2. Resolucion de la contradiccion \"sin lluvia\"\n")
+    # 2. Resolution of the no-rainfall contradiction
+    lines.append("## 2. Resolution of the \"no-rainfall\" contradiction\n")
     lines.append(
-        "La documentacion previa afirmaba que 15 de 59 extremos no tenian lluvia en la "
-        "ventana de entrada. El eval de iter16 reportaba 0. Aplico tres criterios sobre "
-        "el test actual (`iloc[936669:]`):\n"
+        "The previous documentation claimed that 15 of 59 extremes had no rainfall in the "
+        "input window. The iter16 evaluation reported 0. I apply three criteria to "
+        "the current test set (`iloc[936669:]`):\n"
     )
-    lines.append("| Criterio | Definicion | Cuenta / 59 |")
+    lines.append("| Criterion | Definition | Count / 59 |")
     lines.append("|---|---|---:|")
-    lines.append(f"| A | `rain_sum_360m(t) < 0.01 in` (sin lluvia detectable en 6h) | {n_no_rain['A']} |")
-    lines.append(f"| B | `rain_sum_60m(t) < 0.01 in` (sin lluvia en 1h) | {n_no_rain['B']} |")
-    lines.append(f"| C | `sum(rain_in)` en ventana 72 pasos `< 0.01 in` | {n_no_rain['C']} |")
+    lines.append(f"| A | `rain_sum_360m(t) < 0.01 in` (no detectable rainfall in 6h) | {n_no_rain['A']} |")
+    lines.append(f"| B | `rain_sum_60m(t) < 0.01 in` (no rainfall in 1h) | {n_no_rain['B']} |")
+    lines.append(f"| C | `sum(rain_in)` in the 72-step window `< 0.01 in` | {n_no_rain['C']} |")
     lines.append("")
     if n_no_rain["A"] == 0 and n_no_rain["B"] == 0 and n_no_rain["C"] == 0:
         lines.append(
-            "**Veredicto**: los **59 extremos tienen lluvia detectable** en la ventana de 6h "
-            "y de 72 pasos previos al pico. La afirmacion vieja de \"15 sin lluvia\" NO "
-            "aplica al test actual. La cifra operativa de iter16 (0/59 sin lluvia) es la "
-            "correcta. La documentacion previa debe actualizarse.\n"
+            "**Verdict**: all **59 extremes have detectable rainfall** in the 6h window "
+            "and in the 72 steps before the peak. The old claim of \"15 without rainfall\" does NOT "
+            "apply to the current test set. The operational iter16 figure (0/59 without rainfall) is the "
+            "correct one. The previous documentation should be updated.\n"
         )
         lines.append(
-            "Hipotesis para la discrepancia historica: la cifra 15/59 probablemente "
-            "corresponde a un split o test set anterior (por ejemplo cuando el test era "
-            "mas corto o incluia muestras con rain_in=0 en la exacta muestra t pero lluvia "
-            "en la ventana). Ya no se reproduce.\n"
+            "Hypothesis for the historical discrepancy: the 15/59 figure probably "
+            "belongs to an earlier split or test set (for example when the test was "
+            "shorter or included samples with `rain_in=0` at the exact sample `t` but rainfall "
+            "in the window). It is no longer reproduced.\n"
         )
     else:
         lines.append(
-            "**Veredicto**: aun hay casos \"sin lluvia\" en algun criterio. Revisar cuales.\n"
+            "**Verdict**: there are still \"no-rainfall\" cases under at least one criterion. Review which ones.\n"
         )
 
-    # 3. Patrones temporales
-    lines.append("## 3. Patrones temporales (resumen estadistico)\n")
-    lines.append("Estadisticas agregadas de las 59 muestras extremas (no eventos fisicos):\n")
+    # 3. Temporal patterns
+    lines.append("## 3. Temporal patterns (statistical summary)\n")
+    lines.append("Aggregated statistics of the 59 extreme samples (not physical events):\n")
     df_stats = pd.DataFrame(records)
     stat_cols = [
         "lag_pico_lluvia_min", "rain_intensity_max_in", "rain_total_window_in",
@@ -684,20 +684,20 @@ def build_markdown(
             f"{v.median():.2f} | {v.quantile(0.9):.2f} | {v.max():.2f} |"
         )
     lines.append("")
-    # Distribucion por mes
+    # Distribution by month
     month_counts = df_stats["month"].value_counts().sort_index()
     month_repr = {int(k): int(v) for k, v in month_counts.items()}
-    lines.append(f"**Distribucion mensual** (mes:n_muestras): {month_repr}. Picos concentrados "
-                 "en meses de tormentas primavera-verano (julio = 26/59).\n")
+    lines.append(f"**Monthly distribution** (month:n_samples): {month_repr}. Peaks are concentrated "
+                 "in spring-summer storm months (July = 26/59).\n")
 
     # 4. Clustering
     lines.append("## 4. Clustering (K-Means, k=3)\n")
     lines.append(
-        f"Features estandarizadas: {CLUSTER_FEATS}. K=3 justificado por hipotesis "
-        "hidrologica (convectivo vs estratiforme vs atipico). Inercia = "
+        f"Standardized features: {CLUSTER_FEATS}. K=3 justified by the hypothesis "
+        "hydrologic (convective vs stratiform vs atypical). Inertia = "
         f"{cluster_diag['inertia']:.2f}.\n"
     )
-    lines.append("| cluster | etiqueta | n | lag_min | rain_max_in | rain_total_in | duracion | api | tslr_min |")
+    lines.append("| cluster | label | n | lag_min | rain_max_in | rain_total_in | duration | api | tslr_min |")
     lines.append("|---:|---|---:|---:|---:|---:|---:|---:|---:|")
     for c in range(cluster_diag["k"]):
         ctr = cluster_diag["centers_orig"][c]
@@ -714,11 +714,11 @@ def build_markdown(
         )
     lines.append("")
 
-    # 5. Predicciones por cluster
-    lines.append("## 5. Predicciones por cluster (v1 vs naive)\n")
+    # 5. Predictions by cluster
+    lines.append("## 5. Predictions by cluster (v1 vs naive)\n")
     if tcn_available:
         lines.append(
-            "`y_pred_v1` cargado desde `modelo_H1_sinSF_weights.pt` con switch duro "
+            "`y_pred_v1` loaded from `modelo_H1_sinSF_weights.pt` with a hard switch "
             "(threshold=0.3). `y_pred_naive = stormflow(t-1)`. Error % = `(pred-real)/real*100`.\n"
         )
         lines.append("| cluster | label | n | NSE v1 | RMSE v1 | ErrPico% v1 (med) | under50% v1 | NSE naive |")
@@ -732,26 +732,26 @@ def build_markdown(
                 f"{cm['nse_naive']:+.3f} |"
             )
         lines.append("")
-        lines.append("### Metricas globales sobre los 59 extremos\n")
+        lines.append("### Global metrics over the 59 extremes\n")
         lines.append(
-            f"- NSE v1 (59 puntos aislados): **{global_metrics['nse_v1_59']:+.3f}**\n"
+            f"- NSE v1 (59 isolated points): **{global_metrics['nse_v1_59']:+.3f}**\n"
             f"- RMSE v1: **{global_metrics['rmse_v1_59']:.2f} MGD**\n"
             f"- MAE v1: **{global_metrics['mae_v1_59']:.2f} MGD**\n"
-            f"- Error pico % medio v1: **{global_metrics['peak_err_pct_v1_mean']:+.1f}%**\n"
-            f"- NSE naive (referencia): **{global_metrics['nse_naive_59']:+.3f}**\n"
+            f"- Mean peak error % v1: **{global_metrics['peak_err_pct_v1_mean']:+.1f}%**\n"
+            f"- NSE naive (reference): **{global_metrics['nse_naive_59']:+.3f}**\n"
             f"- RMSE naive: **{global_metrics['rmse_naive_59']:.2f} MGD**\n"
         )
         lines.append(
-            "Nota: NSE calculado sobre solo los 59 puntos aislados del bucket Extremo "
-            "no es directamente comparable con el NSE global del bucket en "
-            "`local_eval_metrics.json`, porque aquel usa todas las muestras del "
-            "bucket como conjunto.\n"
+            "Note: NSE computed on only the 59 isolated points from bucket Extremo "
+            "is not directly comparable with the bucket's global NSE in "
+            "`local_eval_metrics.json`, because that one uses all samples from the "
+            "bucket as the evaluation set.\n"
         )
     else:
         lines.append(
-            "**TCN v1 no pudo cargarse**; se reporta solo naive. Ver "
-            "`outputs/data_analysis/local_eval_metrics.json` para metricas "
-            "agregadas oficiales del v1.\n"
+            "**TCN v1 could not be loaded**; only the naive baseline is reported. See "
+            "`outputs/data_analysis/local_eval_metrics.json` for the official aggregated "
+            "metrics of v1.\n"
         )
         lines.append("| cluster | label | n | NSE naive | RMSE naive |")
         lines.append("|---:|---|---:|---:|---:|")
@@ -763,109 +763,109 @@ def build_markdown(
             )
         lines.append("")
 
-    # 6. Cota optimista
-    lines.append("## 6. Cota optimista: oraculo en cluster predecible\n")
+    # 6. Optimistic bound
+    lines.append("## 6. Optimistic bound: oracle on the predictable cluster\n")
     if tcn_available and "best_cluster_id" in cota_optimista:
         lines.append(
-            f"- Cluster mas predecible por v1: **#{cota_optimista['best_cluster_id']}** "
+            f"- Most predictable cluster for v1: **#{cota_optimista['best_cluster_id']}** "
             f"({cota_optimista['best_cluster_label']}, n={cota_optimista['best_cluster_n']}).\n"
-            f"- NSE actual (v1) sobre los 59 extremos: **{cota_optimista['current_nse_v1_bucket_extremo_59']:+.3f}**.\n"
-            f"- NSE si v1 fuera perfecto en ese cluster y mantuviera su error actual en el resto: "
+            f"- Current NSE (v1) over the 59 extremes: **{cota_optimista['current_nse_v1_bucket_extremo_59']:+.3f}**.\n"
+            f"- NSE if v1 were perfect on that cluster and kept its current error on the rest: "
             f"**{cota_optimista['oracle_nse_if_perfect_in_best_cluster']:+.3f}** "
             f"(delta = {cota_optimista['delta_nse']:+.3f}).\n"
         )
         lines.append(
-            "Lectura: esta cota muestra cuanta mejora maxima se puede esperar si resolvemos "
-            "SOLO el cluster mas predecible. Para mejorar mas alla habria que trabajar "
-            "tambien los clusters atipicos (que por hipotesis son fisicamente menos "
-            "predecibles con las features actuales).\n"
+            "Reading: this bound shows how much maximum improvement can be expected if we solve "
+            "ONLY the most predictable cluster. To improve beyond that, we would also need to work on "
+            "the atypical clusters (which, by hypothesis, are physically less predictable "
+            "with the current features).\n"
         )
     else:
-        lines.append("No calculado (TCN v1 no disponible).\n")
+        lines.append("Not computed (TCN v1 not available).\n")
 
-    # 7. Veredicto
-    lines.append("## 7. Veredicto\n")
-    lines.append("### Respuestas a las preguntas clave\n")
+    # 7. Verdict
+    lines.append("## 7. Verdict\n")
+    lines.append("### Answers to the key questions\n")
     if tcn_available:
-        # Cluster con NSE max y min
+        # Cluster with max and min NSE
         best = max(cluster_metrics.keys(),
                    key=lambda c: cluster_metrics[c]["nse_v1"] if not np.isnan(cluster_metrics[c]["nse_v1"]) else -np.inf)
         worst = min(cluster_metrics.keys(),
                     key=lambda c: cluster_metrics[c]["nse_v1"] if not np.isnan(cluster_metrics[c]["nse_v1"]) else +np.inf)
         lines.append(
-            "**P1. Subconjunto predecible con features actuales** "
-            "(alto rain_total_window, lag corto, alta API):\n"
-            f"- Si: el **cluster #{best}** ({cluster_metrics[best]['label']}, "
-            f"n={cluster_metrics[best]['n']}/{len(records)}) es el mas predecible: "
-            f"NSE_v1={cluster_metrics[best]['nse_v1']:+.3f}, error pico mediano "
+            "**P1. Predictable subset with current features** "
+            "(high rain_total_window, short lag, high API):\n"
+            f"- Yes: **cluster #{best}** ({cluster_metrics[best]['label']}, "
+            f"n={cluster_metrics[best]['n']}/{len(records)}) is the most predictable: "
+            f"NSE_v1={cluster_metrics[best]['nse_v1']:+.3f}, median peak error "
             f"{cluster_metrics[best]['peak_err_pct_v1_median']:+.1f}%, "
-            f"con 0 infraestimaciones >50%. Cumple el patron esperado: lluvia intensa, "
-            "lag corto, API alta. Aproximadamente el 20% de las muestras extremas.\n"
+            f"with 0 underestimations >50%. It matches the expected pattern: intense rainfall, "
+            "short lag, high API. Approximately 20% of the extreme samples.\n"
         )
         lines.append(
-            "**P2. Extremos estructuralmente impredecibles** "
-            "(sin lluvia, lag enorme, fuera de patron):\n"
-            "- 0/59 estan \"sin lluvia\" con cualquier criterio. **No hay extremos "
-            "fisicamente ciegos** en el test actual.\n"
-            f"- Sin embargo, el cluster mas problematico es el **#{worst}** "
+            "**P2. Structurally unpredictable extremes** "
+            "(without rainfall, huge lag, off-pattern):\n"
+            "- 0/59 are \"without rainfall\" under any criterion. **There are no physically "
+            "blind extremes** in the current test set.\n"
+            f"- However, the most problematic cluster is **#{worst}** "
             f"({cluster_metrics[worst]['label']}, n={cluster_metrics[worst]['n']}): "
             f"NSE_v1={cluster_metrics[worst]['nse_v1']:+.3f}, "
-            f"error pico mediano {cluster_metrics[worst]['peak_err_pct_v1_median']:+.1f}%, "
-            f"y {cluster_metrics[worst]['under50_v1_count']} muestras con "
-            "infraestimacion >50%. Aqui esta concentrada la mayor parte del fallo.\n"
-            "- El cluster Estratiforme (lluvia larga, lag mayor) tiene RMSE bajo pero "
-            "tampoco lo predice bien: el v1 acierta orden de magnitud pero subestima.\n"
+            f"median peak error {cluster_metrics[worst]['peak_err_pct_v1_median']:+.1f}%, "
+            f"and {cluster_metrics[worst]['under50_v1_count']} samples with "
+            "underestimation >50%. Most of the failure is concentrated here.\n"
+            "- The Stratiform cluster (long rainfall, longer lag) has low RMSE but "
+            "is still not predicted well: v1 gets the order of magnitude right but underestimates.\n"
         )
         lines.append(
             "**P3. v1 vs cluster:**\n"
-            f"- v1 acierta mas en el cluster Convectivo (alta API + lluvia intensa).\n"
-            f"- v1 falla sistematicamente en el cluster Mixto/baja-API: lluvia moderada "
-            "sobre suelo poco saturado da picos altos que el modelo no anticipa.\n"
-            f"- En todos los clusters el v1 mejora al naive (NSE_v1 > NSE_naive), pero "
-            "ningun cluster supera NSE_v1=0 sobre los 59 puntos aislados (esto es "
-            "esperable: 59 puntos con varianza enorme penalizan mucho el denominador).\n"
+            f"- v1 performs best on the Convective cluster (high API + intense rainfall).\n"
+            f"- v1 fails systematically on the Mixed/low-API cluster: moderate rainfall "
+            "over weakly saturated soil produces high peaks that the model does not anticipate.\n"
+            f"- In all clusters v1 improves over the naive baseline (NSE_v1 > NSE_naive), but "
+            "no cluster exceeds NSE_v1=0 on the 59 isolated points (this is expected: 59 points "
+            "with huge variance strongly penalize the denominator).\n"
         )
         lines.append(
-            f"**P4. Cota optimista (oraculo en cluster predecible):**\n"
-            f"- NSE actual sobre los 59 = **{global_metrics['nse_v1_59']:+.3f}**.\n"
-            f"- Con oraculo perfecto en el cluster #{best} (n={cluster_metrics[best]['n']}): "
+            f"**P4. Optimistic bound (oracle on the predictable cluster):**\n"
+            f"- Current NSE over the 59 = **{global_metrics['nse_v1_59']:+.3f}**.\n"
+            f"- With a perfect oracle on cluster #{best} (n={cluster_metrics[best]['n']}): "
             f"NSE = **{cota_optimista['oracle_nse_if_perfect_in_best_cluster']:+.3f}** "
             f"(delta = {cota_optimista['delta_nse']:+.3f}).\n"
-            "- Conclusion: resolver SOLO el cluster predecible aporta una ganancia "
-            "limitada porque ese cluster ya es el mejor predicho. El margen real esta en "
-            f"el cluster Mixto (n={cluster_metrics[worst]['n']}, ~64% de los extremos), "
-            "que requiere features o arquitectura nuevas para mejorar.\n"
+            "- Conclusion: solving ONLY the predictable cluster yields limited gain "
+            "because that cluster is already the best predicted. The real headroom is in "
+            f"the Mixed cluster (n={cluster_metrics[worst]['n']}, ~64% of the extremes), "
+            "which requires new features or architecture to improve.\n"
         )
-    lines.append("### Hallazgos transversales\n")
+    lines.append("### Cross-cutting findings\n")
     if n_no_rain["A"] == 0 and n_no_rain["B"] == 0 and n_no_rain["C"] == 0:
         lines.append(
-            "- **Sin lluvia = 0/59** con cualquier criterio razonable. La cifra vieja "
-            "\"15/59\" NO es valida para el test actual; actualizar documentacion "
+            "- **No rainfall = 0/59** under any reasonable criterion. The old "
+            "\"15/59\" figure is NOT valid for the current test set; update the documentation "
             "(`AGENTS.md`, `CLAUDE.md`, `docs/STATE.md`).\n"
         )
     lines.append(
-        f"- Los {len(records)} picos forman **{len(events_fisicos)} tormentas fisicas** "
-        "distintas. Varias tormentas contribuyen con multiples muestras consecutivas "
-        "al bucket Extremo: la sobre-representacion del bucket Extremo en metricas no "
-        "indica diversidad de eventos sino picos prolongados.\n"
+        f"- The {len(records)} peaks form **{len(events_fisicos)} physical storms** "
+        "different. Several storms contribute multiple consecutive samples "
+        "to bucket Extremo: the over-representation of bucket Extremo in the metrics does not "
+        "indicate event diversity, but prolonged peaks.\n"
     )
     lines.append(
-        "- Los extremos tienen senal de lluvia consistente: el problema de "
-        "infraestimacion **no viene de ausencia de input**, sino de la capacidad del "
-        "regresor para calibrar magnitud en la cola. Coherente con S1/S2: el TCN no "
-        "extrae mas informacion temporal que XGBoost y el atajo `delta_flow_*` "
-        "domina la varianza baja-media pero no ayuda en la cola alta.\n"
+        "- The extremes have a consistent rainfall signal: the underestimation problem "
+        "**does not come from missing input**, but from the regressor's ability to calibrate "
+        "magnitude in the tail. Consistent with S1/S2: the TCN does not extract more temporal "
+        "information than XGBoost, and the `delta_flow_*` shortcut dominates low-to-medium "
+        "variance but does not help in the high tail.\n"
     )
     return "\n".join(lines)
 
 
 def records_index_by_t(records: List[Dict], t_abs: int) -> Dict:
-    """Busca el record con t_abs coincidente. Si no existe, toma el mas cercano (para
-    el pico del evento fisico)."""
+    """Finds the record with matching `t_abs`. If it does not exist, uses the nearest one
+    (for the physical event peak)."""
     for r in records:
         if r["t_abs"] == t_abs:
             return r
-    # fallback: mas cercano
+    # fallback: nearest
     return min(records, key=lambda r: abs(r["t_abs"] - t_abs))
 
 

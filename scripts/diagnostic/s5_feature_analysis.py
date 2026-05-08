@@ -1,30 +1,29 @@
-"""
-S5 - Analisis de features y redundancia.
+﻿"""
+S5 - Feature analysis and redundancy.
 
-Objetivo: identificar que features aportan senal real (no atajo autoregresivo),
-detectar redundancia, y proponer un conjunto reducido implementable. Trabaja
-sobre el mismo split / indices alineados que S2 para que las metricas sean
-comparables.
+Objective: identify which features provide real signal (not an autoregressive
+shortcut), detect redundancy, and propose an implementable reduced set. It works
+on the same split / aligned indices as S2 so the metrics are comparable.
 
-Etapas:
-  1. Reentrena XGBoost-20 (sin delta_flow_*) para H=1 con los mismos hiper de S2.
+Stages:
+  1. Retrains XGBoost-20 (without delta_flow_*) for H=1 with the same hyperparameters as S2.
   2. Importance analysis:
        - Native importance (gain) de XGBoost.
-       - Permutation importance sobre TEST alineado (n_repeats=5,
+       - Permutation importance on aligned TEST (n_repeats=5,
          subsample=50_000 si test es grande).
-       - SHAP TreeExplainer sobre 5_000 filas de test (random_state=42).
-  3. Matriz de correlaciones feature-feature en TRAIN; clustering jerarquico
-     por |1 - r| con corte r>=0.85; representante = feature mas importante
-     del cluster por permutation importance.
-  4. ACF individual de features clave en lags {1, 6, 12, 24} sobre TRAIN.
-     Detecta atajos encubiertos (features con ACF muy similar a la del target).
-  5. Conjunto reducido propuesto (8-12 features) y reentrenamiento XGBoost
-     para comparar NSE H=1 contra XGB-20 y AR(12).
-  6. Deteccion de atajos encubiertos: ablations 1-by-1 sobre top-PI;
-     una feature cuya ablacion cause caida >0.05 NSE es candidata a atajo.
+       - SHAP TreeExplainer on 5_000 test rows (random_state=42).
+  3. Feature-feature correlation matrix on TRAIN; hierarchical clustering
+     by |1 - r| with cutoff r>=0.85; representative = most important feature
+     of the cluster by permutation importance.
+  4. Individual ACF of key features at lags {1, 6, 12, 24} on TRAIN.
+     Detects hidden shortcuts (features with ACF very similar to the target).
+  5. Proposed reduced set (8-12 features) and XGBoost retraining
+     to compare NSE H=1 against XGB-20 and AR(12).
+  6. Hidden shortcut detection: 1-by-1 ablations on top-PI;
+     a feature whose ablation causes an NSE drop >0.05 is a shortcut candidate.
 
-Solo se usan: pandas, numpy, sklearn, xgboost, scipy, matplotlib, seaborn,
-shap (opcional, se omite si no esta disponible).
+Only uses: pandas, numpy, sklearn, xgboost, scipy, matplotlib, seaborn,
+shap (optional, skipped if unavailable).
 
 Artefactos:
   - outputs/diagnostic/S5_feature_analysis.json
@@ -52,12 +51,12 @@ try:
     import shap  # type: ignore
     SHAP_AVAILABLE = True
 except Exception as exc:  # pragma: no cover
-    print(f"[S5] SHAP no disponible: {exc}")
+    print(f"[S5] SHAP not available: {exc}")
     SHAP_AVAILABLE = False
 
 
 # ---------------------------------------------------------------------------
-# Configuracion (alineada con S2)
+# Configuration (aligned with S2)
 # ---------------------------------------------------------------------------
 ROOT = Path("C:/Dev/TFM")
 PARQUET_PATH = ROOT / "outputs" / "cache" / "df_with_features.parquet"
@@ -100,12 +99,12 @@ XGB_PARAMS = dict(
 )
 
 PI_N_REPEATS = 5
-PI_TEST_SUBSAMPLE = 50_000  # subsample para acelerar PI
+PI_TEST_SUBSAMPLE = 50_000  # subsample to speed up PI
 SHAP_N_SAMPLES = 5_000
 RANDOM_STATE = 42
 
-CORR_CLUSTER_THRESHOLD = 0.85  # |r| >= 0.85 => mismo cluster
-EXTREME_BUCKET_THRESHOLD = 25.0  # MGD: usado para SHAP en eventos extremos
+CORR_CLUSTER_THRESHOLD = 0.85  # |r| >= 0.85 => same cluster
+EXTREME_BUCKET_THRESHOLD = 25.0  # MGD: used for SHAP on extreme events
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +134,7 @@ def aligned_indices(split_start: int, split_end: int, horizon: int, total_len: i
 
 
 def acf_at_lags(x: np.ndarray, lags: List[int]) -> Dict[int, float]:
-    """ACF muestral (Pearson) en los lags indicados. NaN si varianza nula."""
+    """Sample ACF (Pearson) at the indicated lags. NaN if variance is zero."""
     out: Dict[int, float] = {}
     x = np.asarray(x, dtype=float)
     x = x[~np.isnan(x)]
@@ -153,10 +152,10 @@ def acf_at_lags(x: np.ndarray, lags: List[int]) -> Dict[int, float]:
 
 
 # ---------------------------------------------------------------------------
-# Etapa 1: entrenamiento XGB-20
+# Stage 1: entrenamiento XGB-20
 # ---------------------------------------------------------------------------
 def train_xgb20(df: pd.DataFrame) -> Tuple[XGBRegressor, np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]:
-    print("[1] Entrenando XGBoost-20 (sin delta_flow) H=1...")
+    print("[1] Training XGBoost-20 (without delta_flow) H=1...")
     idx_train = aligned_indices(0, IDX_TRAIN_END, HORIZON, len(df))
     idx_test = aligned_indices(IDX_VAL_END, len(df), HORIZON, len(df))
     print(f"    n_train={len(idx_train):,}  n_test={len(idx_test):,}")
@@ -173,13 +172,13 @@ def train_xgb20(df: pd.DataFrame) -> Tuple[XGBRegressor, np.ndarray, np.ndarray,
     t0 = time.time()
     model.fit(X_train, y_train)
     t_fit = time.time() - t0
-    print(f"    fit OK en {t_fit:.1f}s")
+    print(f"    fit OK in {t_fit:.1f}s")
 
     return model, X_train, y_train, X_test, y_test, t_fit
 
 
 # ---------------------------------------------------------------------------
-# Etapa 2: importance analysis
+# Stage 2: importance analysis
 # ---------------------------------------------------------------------------
 def native_importance(model: XGBRegressor, features: List[str]) -> Dict[str, float]:
     booster = model.get_booster()
@@ -200,9 +199,9 @@ def permutation_importance_manual(
     n_repeats: int = 5,
     rng_seed: int = 42,
 ) -> Dict[str, Dict[str, float]]:
-    """PI = baseline_NSE - mean_NSE_shuffled. Mas alto = mas importante.
+    """PI = baseline_NSE - mean_NSE_shuffled. Higher = more important.
 
-    Devuelve dict por feature con keys {mean_drop, std_drop, baseline_nse,
+    Returns a dict by feature with keys {mean_drop, std_drop, baseline_nse,
     shuffled_nse_mean}.
     """
     rng = np.random.default_rng(rng_seed)
@@ -239,12 +238,12 @@ def shap_analysis(
     extreme_threshold: float,
     rng_seed: int = 42,
 ) -> Dict[str, object]:
-    """SHAP TreeExplainer sobre subsample de test.
-    Reporta:
-      - mean |SHAP| por feature.
-      - mean SHAP en eventos extremos (y_true>=threshold) vs baseflow (y_true<0.5).
-      - features con cambio de signo (positivo en extremos, negativo en baseflow
-        o viceversa).
+    """SHAP TreeExplainer on a test subsample.
+    Reports:
+      - mean |SHAP| per feature.
+      - mean SHAP in extreme events (y_true>=threshold) vs baseflow (y_true<0.5).
+      - features with sign change (positive in extremes, negative in baseflow
+        or vice versa).
     """
     rng = np.random.default_rng(rng_seed)
     n = len(X_test)
@@ -283,10 +282,10 @@ def shap_analysis(
                 float(np.mean(shap_values[mask_base, j])) if n_base > 0 else float("nan")
             ),
         }
-        # Rango y mediana absoluta para contexto
+        # Range and absolute median for context
         rec["std_shap"] = float(np.std(shap_values[:, j]))
         out["by_feature"][name] = rec
-        # Detectar cambio de signo significativo
+        # Detect significant sign change
         if n_extreme > 0 and n_base > 0:
             if rec["mean_shap_extreme"] * rec["mean_shap_base"] < 0:
                 out["non_monotonic_candidates"].append({
@@ -298,7 +297,7 @@ def shap_analysis(
 
 
 # ---------------------------------------------------------------------------
-# Etapa 3: correlaciones y clustering
+# Stage 3: correlations and clustering
 # ---------------------------------------------------------------------------
 def corr_matrix_train(df: pd.DataFrame, features: List[str]) -> pd.DataFrame:
     idx_train = aligned_indices(0, IDX_TRAIN_END, HORIZON, len(df))
@@ -309,15 +308,15 @@ def corr_matrix_train(df: pd.DataFrame, features: List[str]) -> pd.DataFrame:
 def cluster_features(
     corr: pd.DataFrame, threshold: float, importance: Dict[str, float]
 ) -> Tuple[List[List[str]], Dict[str, str]]:
-    """Cluster jerarquico complete-linkage sobre |1 - r|. Corta a (1 - threshold).
-    Devuelve (clusters_ordenados, mapeo feature->representante).
-    Representante = feature con mayor importance del cluster.
+    """Complete-linkage hierarchical clustering on `|1 - r|`. Cuts at `(1 - threshold).
+    Returns `(sorted_clusters, feature_to_representative_mapping)`.
+    The representative is the feature with the highest importance in the cluster.
     """
     abs_corr = corr.abs().values
-    # Distancia: d_ij = 1 - |r_ij| ; condensa la matriz simetrica
+    # Distance: d_ij = 1 - |r_ij| ; condenses the symmetric matrix
     d = 1.0 - abs_corr
     np.fill_diagonal(d, 0.0)
-    # Forzar simetria perfecta para squareform
+    # Force perfect symmetry for `squareform`
     d = (d + d.T) / 2.0
     condensed = squareform(d, checks=False)
     Z = sch.linkage(condensed, method="complete")
@@ -329,7 +328,7 @@ def cluster_features(
     for fname, cid in zip(feat_names, cluster_ids):
         clusters_dict.setdefault(int(cid), []).append(fname)
 
-    # Ordenar clusters por tamano descendente y luego elegir representante
+    # Sort clusters by descending size and then choose a representative
     clusters_sorted = sorted(clusters_dict.values(), key=lambda c: -len(c))
     representative: Dict[str, str] = {}
     for cl in clusters_sorted:
@@ -345,7 +344,7 @@ def plot_corr_heatmap(corr: pd.DataFrame, path: Path) -> None:
         corr, annot=True, fmt=".2f", cmap="RdBu_r", vmin=-1, vmax=1,
         annot_kws={"size": 7}, cbar_kws={"label": "Pearson r"}, square=True,
     )
-    plt.title("S5 - Matriz de correlacion feature-feature (TRAIN, 20 features)")
+    plt.title("S5 - Feature-feature correlation matrix (TRAIN, 20 features)")
     plt.xticks(rotation=70, ha="right", fontsize=8)
     plt.yticks(rotation=0, fontsize=8)
     plt.tight_layout()
@@ -367,8 +366,8 @@ def plot_perm_importance(pi: Dict[str, Dict[str, float]], path: Path) -> None:
     ax.set_yticklabels(names, fontsize=9)
     ax.invert_yaxis()
     ax.axvline(0, color="grey", lw=0.7)
-    ax.set_xlabel("Caida de NSE al barajar (mean +/- std, n_repeats=5)")
-    ax.set_title("S5 - Permutation importance XGBoost-20 (test alineado)")
+    ax.set_xlabel("NSE drop when shuffled (mean +/- std, n_repeats=5)")
+    ax.set_title("S5 - Permutation importance XGBoost-20 (aligned test)")
     ax.grid(axis="x", alpha=0.3)
     plt.tight_layout()
     plt.savefig(path, dpi=130)
@@ -376,7 +375,7 @@ def plot_perm_importance(pi: Dict[str, Dict[str, float]], path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Etapa 5: conjunto reducido
+# Stage 5: reduced set
 # ---------------------------------------------------------------------------
 def select_reduced_features(
     pi: Dict[str, Dict[str, float]],
@@ -384,11 +383,11 @@ def select_reduced_features(
     target_size_min: int = 8,
     target_size_max: int = 12,
 ) -> Tuple[List[str], List[Dict[str, str]]]:
-    """Estrategia:
-      1. Para cada cluster, usar SOLO el representante (max PI dentro del cluster).
-      2. Quitar features con mean_drop <= 0.
-      3. Si quedan > target_size_max, conservar top por PI.
-      4. Si quedan < target_size_min, completar con la siguiente feature por PI.
+    """Strategy:
+      1. For each cluster, use ONLY the representative (max PI inside the cluster).
+      2. Remove features with mean_drop <= 0.
+      3. If more than target_size_max remain, keep the top by PI.
+      4. If fewer than target_size_min remain, fill with the next feature by PI.
     """
     reps = sorted(set(representative.values()))
     candidates = [f for f in reps if pi[f]["mean_drop"] > 0.0]
@@ -396,14 +395,14 @@ def select_reduced_features(
 
     selected = candidates_ranked[:target_size_max]
     if len(selected) < target_size_min:
-        # Completar con features fuera de selected pero con PI > 0
+        # Complete with features outside `selected` but with PI > 0
         extras = [
             f for f in sorted(pi.keys(), key=lambda f: pi[f]["mean_drop"], reverse=True)
             if f not in selected and pi[f]["mean_drop"] > 0
         ]
         selected = selected + extras[: (target_size_min - len(selected))]
 
-    # Justificacion por feature
+    # Justification per feature
     justifications: List[Dict[str, str]] = []
     for f in selected:
         cluster_members = [k for k, v in representative.items() if v == f]
@@ -444,7 +443,7 @@ def train_reduced_and_eval(
 
 
 # ---------------------------------------------------------------------------
-# Etapa 6: ablation 1-by-1 sobre top-PI (deteccion de atajos encubiertos)
+# Stage 6: 1-by-1 ablation on top-PI (hidden shortcut detection)
 # ---------------------------------------------------------------------------
 def leave_one_out_ablation(
     df: pd.DataFrame,
@@ -452,7 +451,7 @@ def leave_one_out_ablation(
     candidates: List[str],
     base_nse: float,
 ) -> Dict[str, Dict[str, float]]:
-    """Para cada candidato, entrena XGBoost con base_features \\ {c} y mide caida."""
+    """For each candidate, trains XGBoost with `base_features \\ {c}` and measures the drop."""
     idx_train = aligned_indices(0, IDX_TRAIN_END, HORIZON, len(df))
     idx_test = aligned_indices(IDX_VAL_END, len(df), HORIZON, len(df))
     X_full = df[base_features].to_numpy(dtype=np.float32)
@@ -485,30 +484,30 @@ def leave_one_out_ablation(
 # ---------------------------------------------------------------------------
 def render_md(report: Dict[str, object]) -> str:
     lines: List[str] = []
-    lines.append("# S5 - Analisis de features y redundancia\n")
+    lines.append("# S5 - Feature analysis and redundancy\n")
     lines.append(
-        "Diagnostico del valor real (no autoregresivo) de las 20 features oficiales "
-        "tras excluir `delta_flow_*` (atajo confirmado en iter16/S2). Trabaja sobre el "
-        "mismo split y los mismos indices alineados que S2 para que las metricas sean "
-        "directamente comparables.\n"
+        "Diagnostic of the real (non-autoregressive) value of the 20 official features "
+        "after excluding `delta_flow_*` (shortcut confirmed in iter16/S2). It works on the "
+        "same split and aligned indices as S2 so that metrics are "
+        "directly comparable.\n"
     )
 
-    lines.append("## Metodologia\n")
+    lines.append("## Methodology\n")
     lines.append(
-        "- **Modelo base**: XGBoost-20 (mismos hiper que S2) reentrenado para H=1.\n"
-        "- **Permutation importance**: n_repeats=5 sobre subsample de test "
-        f"(n={report['stage_pi']['n_test_used']:,}), shuffling individual de cada feature.\n"
-        f"- **SHAP**: {'TreeExplainer sobre ' + str(report['stage_shap']['n_samples']) + ' filas aleatorias de test (random_state=42).' if SHAP_AVAILABLE else 'no disponible (libreria no instalable).'}\n"
-        f"- **Correlaciones**: matriz Pearson sobre TRAIN ({report['stage_corr']['n_train']:,} filas), "
-        f"clustering jerarquico complete-linkage sobre |1 - r| con corte r>={CORR_CLUSTER_THRESHOLD}.\n"
-        "- **ACF features clave**: lags 1, 6, 12, 24 sobre TRAIN, comparada con la del target "
-        "(referencia DATASET_STATS section 6).\n"
+        "- **Base model**: XGBoost-20 (same hyperparameters as S2) retrained for H=1.\n"
+        "- **Permutation importance**: n_repeats=5 on a test subsample "
+        f"(n={report['stage_pi']['n_test_used']:,}), shuffling each feature individually.\n"
+        f"- **SHAP**: {'TreeExplainer on ' + str(report['stage_shap']['n_samples']) + ' random test rows (random_state=42).' if SHAP_AVAILABLE else 'not available (library cannot be installed).'}\n"
+        f"- **Correlations**: Pearson matrix on TRAIN ({report['stage_corr']['n_train']:,} rows), "
+        f"hierarchical complete-linkage clustering on |1 - r| with cutoff r>={CORR_CLUSTER_THRESHOLD}.\n"
+        "- **Key feature ACFs**: lags 1, 6, 12, 24 on TRAIN, compared with the target "
+        "(reference DATASET_STATS section 6).\n"
     )
 
-    # Tiempos
+    # Time by stage
     timings = report["timings"]
-    lines.append("### Tiempos por etapa\n")
-    lines.append("| Etapa | Segundos |")
+    lines.append("### Time by stage\n")
+    lines.append("| Stage | Seconds |")
     lines.append("|---|---:|")
     for k, v in timings.items():
         lines.append(f"| {k} | {v:.1f} |")
@@ -517,9 +516,9 @@ def render_md(report: Dict[str, object]) -> str:
     # Importance ranking
     lines.append("## 1. Native importance (gain) y Permutation importance\n")
     lines.append(
-        "`gain_pct` = importancia normalizada del booster (suma 1.0). "
-        "`PI mean_drop` = caida promedio de NSE al barajar la feature en test. "
-        "Una feature con PI<=0 se considera ruido (su ablacion no degrada el modelo).\n"
+        "`gain_pct` = normalized booster importance (sum 1.0). "
+        "`PI mean_drop` = average NSE drop when the feature is shuffled in test. "
+        "A feature with PI<=0 is considered noise (its ablation does not degrade the model).\n"
     )
     lines.append("| Feature | gain_pct | PI mean_drop | PI std | rank PI |")
     lines.append("|---|---:|---:|---:|---:|")
@@ -534,19 +533,19 @@ def render_md(report: Dict[str, object]) -> str:
 
     # SHAP
     if report.get("shap") is not None:
-        lines.append("## 2. SHAP (mean |SHAP|, signo en extremos vs base)\n")
+        lines.append("## 2. SHAP (mean |SHAP|, sign in extremes vs base)\n")
         lines.append(
-            "Ranking por importancia media absoluta. `mean_shap_extreme` = SHAP medio en "
+            "Ranking by mean absolute importance. `mean_shap_extreme` = mean SHAP in "
             f"y_true>={EXTREME_BUCKET_THRESHOLD} MGD, `mean_shap_base` = SHAP medio en y_true<0.5 MGD. "
-            "Cambio de signo => contribucion no monotona (la feature empuja arriba en extremos pero "
-            "abajo en baseflow o viceversa).\n"
+            "Sign change => non-monotonic contribution (the feature pushes up in extremes but "
+            "down in baseflow or vice versa).\n"
         )
         sh = report["shap"]
         lines.append(
-            f"_n_samples={sh['n_samples']:,}, n_extremos_en_muestra={sh['n_extreme_in_sample']}, "
-            f"n_base_en_muestra={sh['n_base_in_sample']}._\n"
+            f"_n_samples={sh['n_samples']:,}, n_extremes_in_sample={sh['n_extreme_in_sample']}, "
+            f"n_base_in_sample={sh['n_base_in_sample']}._\n"
         )
-        lines.append("| Feature | mean |SHAP| | mean SHAP extremo | mean SHAP base | std SHAP |")
+        lines.append("| Feature | mean |SHAP| | mean SHAP extreme | mean SHAP base | std SHAP |")
         lines.append("|---|---:|---:|---:|---:|")
         items = sorted(sh["by_feature"].items(), key=lambda kv: kv[1]["mean_abs_shap"], reverse=True)
         for f, v in items:
@@ -556,7 +555,7 @@ def render_md(report: Dict[str, object]) -> str:
             )
         lines.append("")
         if sh["non_monotonic_candidates"]:
-            lines.append("**Features con SHAP no-monotono (signo cambia entre extremos y base):**")
+            lines.append("**Features with non-monotonic SHAP (sign changes between extremes and base):**")
             for nm in sh["non_monotonic_candidates"]:
                 lines.append(
                     f"- `{nm['feature']}`: extremo {nm['mean_shap_extreme']:+.4f} vs "
@@ -564,18 +563,18 @@ def render_md(report: Dict[str, object]) -> str:
                 )
             lines.append("")
         else:
-            lines.append("Ninguna feature muestra cambio de signo entre extremos y baseflow.\n")
+            lines.append("No feature shows a sign change between extremes and baseflow.\n")
     else:
         lines.append("## 2. SHAP\n")
-        lines.append("SHAP no disponible. Usando native + permutation importance.\n")
+        lines.append("SHAP not available. Using native + permutation importance.\n")
 
-    # Correlaciones / clusters
-    lines.append("## 3. Redundancia por correlacion (TRAIN)\n")
+    # Correlations / clusters
+    lines.append("## 3. Redundancy by correlation (TRAIN)\n")
     lines.append(f"Heatmap: `outputs/figures/diagnostic/s5_corr_matrix.png`.\n")
     pairs_high = report["high_corr_pairs"]
     lines.append(
-        f"**Pares con |r| >= {CORR_CLUSTER_THRESHOLD}**: {len(pairs_high)} (lista completa en JSON). "
-        "Top 10 por |r|:\n"
+        f"**Pairs with |r| >= {CORR_CLUSTER_THRESHOLD}**: {len(pairs_high)} (full list in JSON). "
+        "Top 10 by |r|:\n"
     )
     lines.append("| Feature A | Feature B | r |")
     lines.append("|---|---|---:|")
@@ -584,8 +583,8 @@ def render_md(report: Dict[str, object]) -> str:
     lines.append("")
 
     clusters = report["clusters"]
-    lines.append(f"**Clusters de redundancia (corte |r| >= {CORR_CLUSTER_THRESHOLD})**: {len(clusters)} clusters.\n")
-    lines.append("| # | tamano | representante (max PI) | miembros |")
+    lines.append(f"**Redundancy clusters (cutoff |r| >= {CORR_CLUSTER_THRESHOLD})**: {len(clusters)} clusters.\n")
+    lines.append("| # | size | representative (max PI) | members |")
     lines.append("|---|---:|---|---|")
     for i, cl in enumerate(clusters, start=1):
         rep_set = set([report["representative"][f] for f in cl])
@@ -594,11 +593,11 @@ def render_md(report: Dict[str, object]) -> str:
     lines.append("")
 
     # ACF
-    lines.append("## 4. ACF de features clave vs target\n")
+    lines.append("## 4. Key feature ACF vs target\n")
     lines.append(
-        "ACF muestral en lags 1, 6, 12, 24 sobre TRAIN. Si la ACF de una feature es "
-        "muy similar a la del target en los mismos lags, es candidata a transportar "
-        "informacion autoregresiva del target encubierta a traves de su propia inercia.\n"
+        "Sample ACF at lags 1, 6, 12, 24 on TRAIN. If a feature ACF is "
+        "very similar to the target ACF at the same lags, it is a candidate for carrying "
+        "hidden autoregressive target information through its own inertia.\n"
     )
     lines.append("| Feature | ACF lag1 | ACF lag6 | ACF lag12 | ACF lag24 |")
     lines.append("|---|---:|---:|---:|---:|")
@@ -609,7 +608,7 @@ def render_md(report: Dict[str, object]) -> str:
     )
     for f, acf_dict in report["acf_features"].items():
         def _get(d, k):
-            # Soporta keys int y str (las keys se serializan como str para JSON).
+            # Supports int and str keys (keys are serialized as str for JSON).
             v = d.get(k, d.get(str(k), float("nan")))
             return float(v) if v is not None else float("nan")
         lines.append(
@@ -618,17 +617,17 @@ def render_md(report: Dict[str, object]) -> str:
         )
     lines.append("")
 
-    # Conjunto reducido
-    lines.append("## 5. Conjunto reducido propuesto y comparativa\n")
+    # Reduced set
+    lines.append("## 5. Proposed reduced set and comparison\n")
     lines.append(
-        "Criterio: para cada cluster con |r|>=0.85 se conserva solo la feature con "
-        "mayor permutation importance; se descartan las demas. Se eliminan ademas las "
-        "features con PI<=0 (ruido). Si tras filtrar quedan >12 features se conservan "
-        "las top por PI; si quedan <8 se completa con las siguientes mejores.\n"
+        "Criterion: for each cluster with |r|>=0.85 only the feature with the "
+        "highest permutation importance; the others are discarded. Features with "
+        "PI<=0 (noise) are also removed. If after filtering more than 12 features remain, we keep "
+        "the top by PI; if fewer than 8 remain, we fill with the next best ones.\n"
     )
     sel = report["reduced_set"]["selected"]
-    lines.append(f"**Tamano final: {len(sel)} features.**\n")
-    lines.append("| # | Feature | PI mean_drop | tamano cluster | miembros del cluster |")
+    lines.append(f"**Final size: {len(sel)} features.**\n")
+    lines.append("| # | Feature | PI mean_drop | cluster size | cluster members |")
     lines.append("|---|---|---:|---:|---|")
     for i, j in enumerate(report["reduced_set"]["justification"], start=1):
         members = ", ".join(f"`{m}`" for m in j["cluster_members"])
@@ -642,8 +641,8 @@ def render_md(report: Dict[str, object]) -> str:
     metrics_red = report["reduced_set"]["metrics"]
     metrics_xgb20 = report["xgb20_metrics"]
     delta_red_vs_xgb20 = metrics_red["nse"] - metrics_xgb20["nse"]
-    lines.append("### Comparativa NSE H=1 (test alineado)\n")
-    lines.append("| Modelo | N feats | NSE | RMSE | MAE | Pico pred | Err pico % |")
+    lines.append("### NSE H=1 comparison (aligned test)\n")
+    lines.append("| Modelo | N feats | NSE | RMSE | MAE | Peak pred | Peak err % |")
     lines.append("|---|---:|---:|---:|---:|---:|---:|")
     lines.append(
         f"| **AR(12) (S2)** | - | {report['ar12_nse_h1_ref']:.4f} | - | - | - | - |"
@@ -659,44 +658,44 @@ def render_md(report: Dict[str, object]) -> str:
     )
     lines.append("")
     if abs(delta_red_vs_xgb20) <= 0.01:
-        veredicto_red = "Conjunto reducido **VALIDO** (delta dentro de +-0.01 NSE)."
+        veredicto_red = "Reduced set **VALID** (delta within +-0.01 NSE)."
     elif delta_red_vs_xgb20 > 0.01:
         veredicto_red = (
-            f"Conjunto reducido **MEJORA {delta_red_vs_xgb20:+.4f} NSE** sobre XGB-20: "
-            "la reduccion elimina ruido/features anti-correlacionadas con el target."
+            f"Reduced set **IMPROVES {delta_red_vs_xgb20:+.4f} NSE** over XGB-20: "
+            "the reduction removes noise / features anti-correlated with the target."
         )
     else:
-        veredicto_red = f"Conjunto reducido **PIERDE {abs(delta_red_vs_xgb20):.4f} NSE**: revisar el criterio de corte."
-    lines.append(f"Delta NSE (reducido - XGB-20) = **{delta_red_vs_xgb20:+.4f}**. {veredicto_red}\n")
+        veredicto_red = f"Reduced set **LOSES {abs(delta_red_vs_xgb20):.4f} NSE**: review the cutoff criterion."
+    lines.append(f"Delta NSE (reduced - XGB-20) = **{delta_red_vs_xgb20:+.4f}**. {veredicto_red}\n")
 
-    # Atajos encubiertos
-    lines.append("## 6. Atajos encubiertos (ablation 1-by-1 sobre top-PI)\n")
+    # Hidden shortcuts
+    lines.append("## 6. Hidden shortcuts (1-by-1 ablation on top-PI)\n")
     lines.append(
-        "Sobre el conjunto reducido, ablacion individual de cada feature. "
-        "Una caida >0.05 NSE al quitarla indica una dependencia muy fuerte: candidata a atajo "
-        "(o feature genuinamente irreemplazable).\n"
+        "On the reduced set, individual ablation of each feature. "
+        "A drop >0.05 NSE when removing it indicates a very strong dependency: candidate shortcut "
+        "(or a genuinely irreplaceable feature).\n"
     )
-    lines.append("| Feature ablada | NSE sin ella | Delta NSE (caida) | Diagnostico |")
+    lines.append("| Ablated feature | NSE without it | Delta NSE (drop) | Diagnosis |")
     lines.append("|---|---:|---:|---|")
     for f, v in sorted(report["ablation_reduced"].items(), key=lambda kv: kv[1]["delta_nse"], reverse=True):
         if v["delta_nse"] >= 0.05:
-            diag = "ATAJO POSIBLE / feature dominante"
+            diag = "POSSIBLE SHORTCUT / dominant feature"
         elif v["delta_nse"] >= 0.01:
-            diag = "Aporta valor real"
+            diag = "Provides real value"
         elif v["delta_nse"] >= -0.005:
-            diag = "Marginal o redundante"
+            diag = "Marginal or redundant"
         else:
-            diag = "Quitar mejora (probable ruido)"
+            diag = "Removing it improves (likely noise)"
         lines.append(f"| `{f}` | {v['nse_without']:.4f} | {v['delta_nse']:+.4f} | {diag} |")
     lines.append("")
 
     # Hallazgos clave
-    lines.append("## Hallazgos clave\n")
+    lines.append("## Key findings\n")
     lines.append("\n".join(report["key_findings"]))
     lines.append("")
 
     # Veredicto
-    lines.append("## Veredicto\n")
+    lines.append("## Verdict\n")
     lines.append(report["verdict"])
     lines.append("")
 
@@ -709,13 +708,13 @@ def render_md(report: Dict[str, object]) -> str:
 def main() -> None:
     timings: Dict[str, float] = {}
 
-    print(f"Cargando parquet: {PARQUET_PATH}")
+    print(f"Loading parquet: {PARQUET_PATH}")
     t0 = time.time()
     df = pd.read_parquet(PARQUET_PATH)
     timings["load_parquet"] = time.time() - t0
     print(f"  shape={df.shape}  load={timings['load_parquet']:.1f}s")
 
-    # ---------- Etapa 1: XGB-20 ----------
+    # ---------- Stage 1: XGB-20 ----------
     t0 = time.time()
     model, X_train, y_train, X_test, y_test, t_fit_xgb20 = train_xgb20(df)
     timings["xgb20_fit"] = time.time() - t0
@@ -734,12 +733,12 @@ def main() -> None:
     }
     print(f"  XGB-20 NSE base = {base_nse:.4f}")
 
-    # ---------- Etapa 2a: Native importance ----------
+    # ---------- Stage 2a: Native importance ----------
     t0 = time.time()
     gain = native_importance(model, FEATURES_20)
     timings["native_importance"] = time.time() - t0
 
-    # ---------- Etapa 2b: Permutation importance ----------
+    # ---------- Stage 2b: Permutation importance ----------
     print("[2b] Permutation importance (n_repeats=5)...")
     rng = np.random.default_rng(RANDOM_STATE)
     n_test = len(X_test)
@@ -758,9 +757,9 @@ def main() -> None:
         model, X_pi, y_pi, FEATURES_20, n_repeats=PI_N_REPEATS, rng_seed=RANDOM_STATE
     )
     timings["permutation_importance"] = time.time() - t0
-    print(f"  PI calculada sobre {n_pi_used:,} filas en {timings['permutation_importance']:.1f}s")
+    print(f"  PI computed on {n_pi_used:,} rows in {timings['permutation_importance']:.1f}s")
 
-    # ---------- Etapa 2c: SHAP ----------
+    # ---------- Stage 2c: SHAP ----------
     shap_report = None
     if SHAP_AVAILABLE:
         print("[2c] SHAP TreeExplainer...")
@@ -773,22 +772,22 @@ def main() -> None:
                 rng_seed=RANDOM_STATE,
             )
             timings["shap"] = time.time() - t0
-            print(f"  SHAP OK ({shap_report['n_samples']} filas, n_extremo={shap_report['n_extreme_in_sample']})")
+            print(f"  SHAP OK ({shap_report['n_samples']} filas, n_extreme={shap_report['n_extreme_in_sample']})")
         except Exception as exc:
-            print(f"  SHAP fallo: {exc}")
+            print(f"  SHAP failed: {exc}")
             shap_report = None
             timings["shap"] = time.time() - t0
     else:
         timings["shap"] = 0.0
 
-    # ---------- Etapa 3: correlaciones / clusters ----------
-    print("[3] Matriz de correlaciones y clustering...")
+    # ---------- Stage 3: correlations / clusters ----------
+    print("[3] Correlation matrix and clustering...")
     t0 = time.time()
     corr_train = corr_matrix_train(df, FEATURES_20)
     n_train = int(IDX_TRAIN_END - SEQ_LENGTH)
     plot_corr_heatmap(corr_train, FIG_DIR / "s5_corr_matrix.png")
 
-    # Pares con |r| >= threshold
+    # Pairs with |r| >= threshold
     high_pairs: List[Dict[str, float]] = []
     cols = list(corr_train.columns)
     for i in range(len(cols)):
@@ -798,19 +797,19 @@ def main() -> None:
                 high_pairs.append({"a": cols[i], "b": cols[j], "r": r})
     high_pairs.sort(key=lambda d: -abs(d["r"]))
 
-    # Importancia para elegir representante de cluster: usamos PI (mean_drop)
+    # Importance for choosing the cluster representative: we use PI (mean_drop).
     pi_for_cluster = {f: pi[f]["mean_drop"] for f in FEATURES_20}
     clusters, representative = cluster_features(
         corr_train, threshold=CORR_CLUSTER_THRESHOLD, importance=pi_for_cluster
     )
     timings["corr_cluster"] = time.time() - t0
-    print(f"  pares >= {CORR_CLUSTER_THRESHOLD}: {len(high_pairs)} ; clusters: {len(clusters)}")
+    print(f"  pairs >= {CORR_CLUSTER_THRESHOLD}: {len(high_pairs)} ; clusters: {len(clusters)}")
 
     # ---------- Plot PI ----------
     plot_perm_importance(pi, FIG_DIR / "s5_permutation_importance.png")
 
-    # ---------- Etapa 4: ACF ----------
-    print("[4] ACF de features clave...")
+    # ---------- Stage 4: ACF ----------
+    print("[4] ACF of key features...")
     t0 = time.time()
     idx_train = aligned_indices(0, IDX_TRAIN_END, HORIZON, len(df))
     acf_features: Dict[str, Dict[int, float]] = {}
@@ -820,35 +819,35 @@ def main() -> None:
             continue
         x = df[f].iloc[idx_train].to_numpy(dtype=float)
         acf_features[f] = acf_at_lags(x, ACF_LAGS)
-    # ACF del target sobre TRAIN para validar referencia
+    # Target ACF on TRAIN to validate the reference.
     y_train_full = df[TARGET_COL].iloc[idx_train].to_numpy(dtype=float)
     target_acf_emp = acf_at_lags(y_train_full, ACF_LAGS)
     timings["acf"] = time.time() - t0
 
-    # ---------- Etapa 5: conjunto reducido ----------
-    print("[5] Construyendo conjunto reducido...")
+    # ---------- Stage 5: reduced set ----------
+    print("[5] Building reduced set...")
     t0 = time.time()
     selected, justification = select_reduced_features(pi, representative)
     metrics_reduced = train_reduced_and_eval(df, selected)
     timings["reduced_set"] = time.time() - t0
     print(f"  Reducido n={len(selected)}  NSE={metrics_reduced['nse']:.4f}")
 
-    # ---------- Etapa 6: ablacion 1-by-1 sobre el reducido ----------
-    print("[6] Ablacion 1-by-1 sobre conjunto reducido...")
+    # ---------- Stage 6: 1-by-1 ablation on the reduced set ----------
+    print("[6] 1-by-1 ablation on the reduced set...")
     t0 = time.time()
     ablation_reduced = leave_one_out_ablation(
         df, selected, selected, base_nse=metrics_reduced["nse"]
     )
     timings["ablation_reduced"] = time.time() - t0
 
-    # ---------- Hallazgos clave (texto) ----------
+    # ---------- Key findings (text) ----------
     items_pi = sorted(pi.items(), key=lambda kv: kv[1]["mean_drop"], reverse=True)
     top5_pi = items_pi[:5]
     top5_str = ", ".join([f"`{f}`(+{v['mean_drop']:.4f})" for f, v in top5_pi])
     n_pairs_red = len(high_pairs)
     n_independent = len(clusters)
     pi_neg_or_zero = [f for f, v in pi.items() if v["mean_drop"] <= 0]
-    abl_atajos = [f for f, v in ablation_reduced.items() if v["delta_nse"] >= 0.05]
+    abl_shortcuts = [f for f, v in ablation_reduced.items() if v["delta_nse"] >= 0.05]
 
     long_rain = ["rain_sum_180m", "rain_sum_360m"]
     long_rain_pi = {f: pi[f]["mean_drop"] for f in long_rain if f in pi}
@@ -858,58 +857,58 @@ def main() -> None:
 
     key_findings: List[str] = []
     key_findings.append(
-        f"1. **Top 5 features por permutation importance**: {top5_str}. "
-        "Estas son las que realmente impactan NSE cuando se barajan en test, "
-        "no necesariamente las que mas usa el booster por gain."
+        f"1. **Top 5 features by permutation importance**: {top5_str}. "
+        "These are the ones that really impact NSE when shuffled in test, "
+        "not necessarily the ones the booster uses most by gain."
     )
     key_findings.append(
-        f"2. **Redundancia: {n_pairs_red} pares con |r|>=0.85**, agrupados en "
-        f"**{n_independent} clusters independientes**. La dimensionalidad efectiva "
-        f"esta mucho mas cerca de {n_independent} que de 20."
+        f"2. **Redundancy: {n_pairs_red} pairs with |r|>=0.85**, grouped into "
+        f"**{n_independent} independent clusters**. The effective dimensionality "
+        f"is much closer to {n_independent} than to 20."
     )
-    if abl_atajos:
+    if abl_shortcuts:
         key_findings.append(
-            f"3. **Atajos encubiertos detectados (ablation drop >0.05 NSE)**: {', '.join('`'+f+'`' for f in abl_atajos)}. "
-            "Tras quitar `delta_flow_*` siguen apareciendo features dominantes; revisar "
-            "si su valor proviene de senal fisica o de inercia autoregresiva del target."
+            f"3. **Hidden shortcuts detected (ablation drop >0.05 NSE)**: {', '.join('`'+f+'`' for f in abl_shortcuts)}. "
+            "After removing `delta_flow_*`, dominant features still appear; review "
+            "whether its value comes from physical signal or autoregressive target inertia."
         )
     else:
         key_findings.append(
-            "3. **No se detectan atajos encubiertos adicionales**: ninguna feature, "
-            "tras quitar `delta_flow_*`, causa caida >0.05 NSE en ablation 1-by-1. "
-            "El conjunto reducido depende repartidamente de varias features."
+            "3. **No additional hidden shortcuts are detected**: no feature, "
+            "after removing `delta_flow_*`, causes a drop >0.05 NSE in 1-by-1 ablation. "
+            "The reduced set depends on multiple features."
         )
     if abs(delta_red_vs_xgb20) <= 0.01:
-        red_status = "validado (delta dentro de +-0.01 NSE)."
+        red_status = "validated (delta within +-0.01 NSE)."
     elif delta_red_vs_xgb20 > 0.01:
-        red_status = f"mejora (+{delta_red_vs_xgb20:.4f} NSE sobre XGB-20: al quitar features con PI<=0 se elimina ruido)."
+        red_status = f"improves (+{delta_red_vs_xgb20:.4f} NSE over XGB-20: removing PI<=0 features eliminates noise)."
     else:
-        red_status = f"revisar (perdida {delta_red_vs_xgb20:+.4f} NSE > 0.01)."
+        red_status = f"review (loss {delta_red_vs_xgb20:+.4f} NSE > 0.01)."
     key_findings.append(
-        f"4. **Conjunto reducido propuesto ({len(selected)} features)**: "
+        f"4. **Proposed reduced set ({len(selected)} features)**: "
         f"NSE={metrics_reduced['nse']:.4f} vs XGB-20={xgb20_metrics['nse']:.4f} "
         f"(delta {delta_red_vs_xgb20:+.4f}). " + red_status.capitalize()
     )
     if long_rain_pi:
         rains_text = ", ".join([f"`{k}`(PI={v:+.4f})" for k, v in long_rain_pi.items()])
         veredicto_long = (
-            "tienen PI marginal o negativa: candidatas a descartar"
+            "have marginal or negative PI: candidates to discard"
             if all(v <= 0.005 for v in long_rain_pi.values())
-            else "aportan PI medible: mantener"
+            else "provide measurable PI: keep"
         )
-        key_findings.append(f"5. **Lluvias largas {rains_text}**: {veredicto_long}.")
+        key_findings.append(f"5. **Long rains {rains_text}**: {veredicto_long}.")
     if pi_neg_or_zero:
         key_findings.append(
-            f"6. **Features con PI <= 0**: {', '.join('`'+f+'`' for f in pi_neg_or_zero)}. "
-            "Su shuffle no degrada el modelo: ruido para esta tarea."
+            f"6. **Features with PI <= 0**: {', '.join('`'+f+'`' for f in pi_neg_or_zero)}. "
+            "Shuffling them does not degrade the model: noise for this task."
         )
 
-    # ACF: candidatos a transportar inercia del target
+    # ACF: candidates for carrying target inertia
     acf_notes: List[str] = []
     for f, acf_d in acf_features.items():
         if any(np.isnan(v) for v in acf_d.values()):
             continue
-        # Comparacion sencilla lag6 y lag12
+        # Simple lag6 and lag12 comparison.
         r1_delta = abs(acf_d.get(1, 0.0) - TARGET_ACF_REF[1])
         r6_delta = abs(acf_d.get(6, 0.0) - TARGET_ACF_REF[6])
         r12_delta = abs(acf_d.get(12, 0.0) - TARGET_ACF_REF[12])
@@ -917,60 +916,60 @@ def main() -> None:
         very_flat = acf_d.get(1, 0.0) < 0.3
         if very_similar_lag12:
             acf_notes.append(
-                f"`{f}` con ACF lag1={acf_d[1]:.3f}, lag12={acf_d[12]:.3f} (target=0.420): "
-                "inercia comparable a la del target en lag12 => posible portador de senal autoregresiva encubierta."
+                f"`{f}` with ACF lag1={acf_d[1]:.3f}, lag12={acf_d[12]:.3f} (target=0.420): "
+                "inertia comparable to the target at lag12 => possible carrier of hidden autoregressive signal."
             )
         elif very_flat:
             acf_notes.append(
-                f"`{f}` con ACF lag1={acf_d[1]:.3f}: memoria corta, comportamiento tipo diferencia o ruido."
+            f"`{f}` with ACF lag1={acf_d[1]:.3f}: short memory, difference-like behavior or noise."
             )
     if acf_notes:
-        key_findings.append("7. **ACF individual (posible inercia encubierta)**:\n   - " + "\n   - ".join(acf_notes))
+        key_findings.append("7. **Individual ACF (possible hidden inertia)**:\n   - " + "\n   - ".join(acf_notes))
 
-    # Veredicto global
+    # Global verdict
     verdict_lines: List[str] = []
     verdict_lines.append(
-        "Las 20 features oficiales (sin `delta_flow_*`) contienen una redundancia masiva: "
-        f"{n_pairs_red} pares con |r|>=0.85 que se agrupan en {n_independent} clusters "
-        "casi independientes. La capacidad predictiva real del modelo XGBoost vive en un "
-        "subespacio mucho mas pequeno."
+        "The 20 official features (without `delta_flow_*`) contain massive redundancy: "
+        f"{n_pairs_red} pairs with |r|>=0.85 that cluster into {n_independent} clusters "
+        "almost independent clusters. The real predictive capacity of the XGBoost model lives in a "
+        "much smaller subspace."
     )
     verdict_lines.append("")
     if abs(delta_red_vs_xgb20) <= 0.01:
         verdict_lines.append(
-            f"El conjunto reducido propuesto ({len(selected)} features) iguala a XGB-20 "
-            f"(delta dentro de +-0.01 NSE) manteniendo solo el representante de cada cluster + "
-            "features con PI > 0. Es una recomendacion accionable: simplificar el preprocesado y "
-            "la entrada del modelo sin sacrificar metrica."
+            f"The proposed reduced set ({len(selected)} features) matches XGB-20 "
+            f"(delta within +-0.01 NSE) while keeping only the representative of each cluster + "
+            "features with PI > 0. This is an actionable recommendation: simplify preprocessing and "
+            "the model input without sacrificing metric."
         )
     elif delta_red_vs_xgb20 > 0.01:
         verdict_lines.append(
-            f"El conjunto reducido ({len(selected)} features) **mejora {delta_red_vs_xgb20:+.4f} NSE** "
-            "sobre XGB-20. Reducir la dimensionalidad no solo no pierde senal sino que limpia ruido: "
-            "las features con PI<=0 (hour_cos, month_sin, month_cos, rain_sum_60m, rain_max_30m, "
-            "rain_max_60m) estaban degradando el fit de XGBoost."
+            f"The reduced set ({len(selected)} features) **improves {delta_red_vs_xgb20:+.4f} NSE** "
+            "over XGB-20. Reducing dimensionality not only does not lose signal but also cleans noise: "
+            "the features with PI<=0 (hour_cos, month_sin, month_cos, rain_sum_60m, rain_max_30m, "
+            "rain_max_60m) were degrading the XGBoost fit."
         )
     else:
         verdict_lines.append(
-            f"El conjunto reducido propuesto pierde {delta_red_vs_xgb20:+.4f} NSE. "
-            "Investigar si el criterio de cluster es demasiado agresivo o si hay interacciones que "
-            "se rompen al colapsar features muy correlacionadas pero complementarias."
+            f"The proposed reduced set loses {delta_red_vs_xgb20:+.4f} NSE. "
+            "Investigate whether the cluster criterion is too aggressive or whether there are interactions that "
+            "break when collapsing highly correlated but complementary features."
         )
     verdict_lines.append("")
-    if abl_atajos:
+    if abl_shortcuts:
         verdict_lines.append(
-            "La ablation 1-by-1 sobre el reducido revela features con peso desproporcionado "
-            "(>=0.05 NSE de caida): "
-            + ", ".join("`" + f + "`" for f in abl_atajos)
-            + ". Antes de lanzar mas iteraciones de TCN conviene confirmar que estas features "
-            "no contienen informacion del target encubierta (ACF compatible, retardos no fisicos, etc.)."
+            "The 1-by-1 ablation on the reduced set reveals features with disproportionate weight "
+            "(>=0.05 NSE drop): "
+            + ", ".join("`" + f + "`" for f in abl_shortcuts)
+            + ". Before launching more TCN iterations it is worth confirming that these features "
+            "do not contain hidden target information (compatible ACF, non-physical lags, etc.)."
         )
     else:
         verdict_lines.append(
-            "Sin features con caida >=0.05 NSE en la ablation, el modelo XGBoost reducido reparte "
-            "su senal de forma sana entre las features fisicas (lluvia agregada + API + temperatura "
-            "+ estacionalidad). No quedan atajos evidentes que limpiar mas alla de los `delta_flow_*` "
-            "ya excluidos."
+            "Without features with a drop >=0.05 NSE in ablation, the reduced XGBoost model spreads "
+            "its signal in a healthy way across the physical features (aggregated rain + API + temperature "
+            "+ seasonality). No obvious shortcuts remain to clean up beyond the already excluded `delta_flow_*` "
+            "features."
         )
 
     # ---------- Empaquetar ----------
@@ -1017,7 +1016,7 @@ def main() -> None:
         "verdict": "\n\n".join(verdict_lines),
     }
 
-    # Sanear NaN/Inf para JSON
+    # Clean NaN/Inf for JSON
     def _clean(o):
         if isinstance(o, dict):
             return {k: _clean(v) for k, v in o.items()}
@@ -1039,19 +1038,22 @@ def main() -> None:
     json_path = OUT_DIR / "S5_feature_analysis.json"
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(_clean(report), f, indent=2, ensure_ascii=False)
-    print(f"\nEscrito: {json_path}")
+    print(f"\nWritten: {json_path}")
 
     md_text = render_md(report)
     md_path = OUT_DIR / "S5_feature_analysis.md"
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(md_text)
-    print(f"Escrito: {md_path}")
-    print(f"Figuras: {FIG_DIR}/s5_corr_matrix.png  +  s5_permutation_importance.png")
+    print(f"Written: {md_path}")
+    print(f"Figures: {FIG_DIR}/s5_corr_matrix.png  +  s5_permutation_importance.png")
 
-    print("\nTiempos por etapa:")
+    print("\nTime by stage:")
     for k, v in timings.items():
         print(f"  {k}: {v:.1f}s")
 
 
 if __name__ == "__main__":
     main()
+
+
+
