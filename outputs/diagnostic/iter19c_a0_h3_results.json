@@ -1,0 +1,270 @@
+{
+  "meta": {
+    "iter": "19c",
+    "branch": "iter19-tcn-comparison",
+    "purpose": "Replicar A0 (con log1p) a H=3 para cerrar comparacion contra XGB iter17 H=3. Cierra el pendiente del HANDOFF_2026-04-29.md sobre validar A0 como modelo principal del TFM en H=3.",
+    "horizon": 3,
+    "config": {
+      "horizon": 3,
+      "L": 72,
+      "C": 32,
+      "log1p_target": true,
+      "kernel_size": 3,
+      "num_blocks": 4,
+      "dilations": [
+        1,
+        2,
+        4,
+        8
+      ],
+      "dropout": 0.1,
+      "lr": 0.001,
+      "weight_decay": 0.0001,
+      "batch_size": 256,
+      "max_epochs": 50,
+      "patience": 10,
+      "grad_clip": 1.0,
+      "seed": 42
+    },
+    "device": "cuda",
+    "seed": 42,
+    "feature_cols_tcn": [
+      "stormflow_mgd",
+      "api_dynamic",
+      "rain_sum_360m",
+      "rain_sum_120m",
+      "rain_sum_15m",
+      "temp_daily_f",
+      "hour_sin",
+      "minutes_since_last_rain",
+      "delta_rain_10m",
+      "delta_rain_30m",
+      "rain_sum_30m"
+    ],
+    "split": {
+      "train_end_idx": 771374,
+      "val_end_idx": 936669,
+      "total_len": 1101964
+    },
+    "baseline_xgb_iter17": {
+      "name": "xgb_lag6_feat10",
+      "nse_h3_iter17": 0.6871
+    }
+  },
+  "training": {
+    "best_epoch": 3,
+    "best_val_nse": 0.4871635876087883,
+    "training_time_seconds": 516.7914071083069,
+    "n_params": 23489,
+    "weights_path": "/content/stormflow-prediction/outputs/iter19/weights/A0_h3.pt",
+    "train_loss_history": [
+      0.03826227064568696,
+      0.032016787768260925,
+      0.030832093268221165,
+      0.03003604901791326,
+      0.029364439441985985,
+      0.028851452999749217,
+      0.02850358049767608,
+      0.0280977123190698,
+      0.02765423935936029,
+      0.02751935455407805,
+      0.027119075938492984,
+      0.026983271088510494,
+      0.026784640302435873
+    ],
+    "val_nse_history": [
+      0.4526111618520855,
+      0.4314678762637726,
+      0.4871635876087883,
+      0.45695639540986055,
+      0.44527046504361933,
+      0.16922236051590744,
+      0.3574406781698275,
+      -1.8150656722036116,
+      0.4757465265318912,
+      -0.36352287379963344,
+      0.387134568783602,
+      0.47477116640181116,
+      0.48470075682290015
+    ]
+  },
+  "metrics_test_TCN_A0_H3": {
+    "global": {
+      "n": 165220,
+      "nse": 0.6096314927236155,
+      "rmse": 1.502193061108542,
+      "mae": 0.13961983461142308,
+      "peak_real_mgd": 135.15091527565892,
+      "peak_pred_mgd": 63.2414613998827,
+      "peak_err_pct": -53.20678275031063
+    },
+    "buckets": {
+      "Base": {
+        "n": 152898,
+        "nse": 0.7110910586444473,
+        "rmse": 0.04701510596619822,
+        "mae": 0.026181073187342096,
+        "bias": 0.0038325225124368895,
+        "peak_err_pct": 332.8758915164244
+      },
+      "Leve": {
+        "n": 9520,
+        "nse": 0.6266227887815508,
+        "rmse": 0.6667949824311968,
+        "mae": 0.3797103559960257,
+        "bias": 0.08301498786923461,
+        "peak_err_pct": 94.40371158192302
+      },
+      "Moderado": {
+        "n": 2303,
+        "nse": -0.13041255116132677,
+        "rmse": 4.297132587642728,
+        "mae": 2.9007264370824033,
+        "bias": -1.4456585487115128,
+        "peak_err_pct": 137.02281581461017
+      },
+      "Alto": {
+        "n": 440,
+        "nse": -3.805363699915957,
+        "rmse": 16.246059508199078,
+        "mae": 12.555988524876273,
+        "bias": -11.406271738459054,
+        "peak_err_pct": 27.097829492861784
+      },
+      "Extremo": {
+        "n": 59,
+        "nse": -8.06361431254818,
+        "rmse": 59.60395321744783,
+        "mae": 55.0017766385184,
+        "bias": -55.0017766385184,
+        "peak_err_pct": -59.915736050871416
+      }
+    },
+    "n_events": 186,
+    "event_definition": {
+      "threshold_mgd": 0.5,
+      "gap_minutes": 240.0
+    },
+    "peak_lag": {
+      "n_events": 186,
+      "mean_lag_minutes": 11.075268817204302,
+      "median_lag_minutes": 15.0,
+      "median_abs_lag_minutes": 15.0,
+      "p90_abs_lag_minutes": 40.0
+    },
+    "recall": {
+      "at_25_mgd": {
+        "threshold_mgd": 25.0,
+        "n_events_with_y_true_ge_thr": 57,
+        "n_events_alerted": 19,
+        "recall": 0.3333333333333333,
+        "fn_peak_real_mean": 46.03160723563913,
+        "fn_peak_real_max": 97.90432386392304
+      },
+      "at_50_mgd": {
+        "threshold_mgd": 50.0,
+        "n_events_with_y_true_ge_thr": 23,
+        "n_events_alerted": 2,
+        "recall": 0.08695652173913043,
+        "fn_peak_real_mean": 75.13116076927626,
+        "fn_peak_real_max": 135.15091527565892
+      }
+    },
+    "quantile_coverage": null
+  },
+  "metrics_test_XGB_inline_H3": {
+    "global": {
+      "n": 165220,
+      "nse": 0.6888525275783748,
+      "rmse": 1.3411318618720658,
+      "mae": 0.1778836753014839,
+      "peak_real_mgd": 135.15089416503906,
+      "peak_pred_mgd": 116.85586547851562,
+      "peak_err_pct": -13.536742616132841
+    },
+    "buckets": {
+      "Base": {
+        "n": 152898,
+        "nse": -4.369408385914205,
+        "rmse": 0.20268431994042574,
+        "mae": 0.06915478578834623,
+        "bias": 0.05981093505832722,
+        "peak_err_pct": 2569.135364839377
+      },
+      "Leve": {
+        "n": 9520,
+        "nse": 0.01031498999678504,
+        "rmse": 1.0855926785221295,
+        "mae": 0.5165192722589435,
+        "bias": 0.267874464210702,
+        "peak_err_pct": 599.5700395237009
+      },
+      "Moderado": {
+        "n": 2303,
+        "nse": -0.3912472856085871,
+        "rmse": 4.767189588625799,
+        "mae": 2.9710079536288396,
+        "bias": 0.11521023139842841,
+        "peak_err_pct": 159.22726993064396
+      },
+      "Alto": {
+        "n": 440,
+        "nse": -2.1355011288076406,
+        "rmse": 13.123158215602015,
+        "mae": 9.95156689431857,
+        "bias": -6.834434265270829,
+        "peak_err_pct": 37.176895022894804
+      },
+      "Extremo": {
+        "n": 59,
+        "nse": -5.553490258292825,
+        "rmse": 50.68279458109279,
+        "mae": 45.392002936136926,
+        "bias": -43.70455672983396,
+        "peak_err_pct": -13.536742616132841
+      }
+    },
+    "n_events": 186,
+    "event_definition": {
+      "threshold_mgd": 0.5,
+      "gap_minutes": 240.0
+    },
+    "peak_lag": {
+      "n_events": 186,
+      "mean_lag_minutes": 7.204301075268817,
+      "median_lag_minutes": 5.0,
+      "median_abs_lag_minutes": 10.0,
+      "p90_abs_lag_minutes": 62.5
+    },
+    "recall": {
+      "at_25_mgd": {
+        "threshold_mgd": 25.0,
+        "n_events_with_y_true_ge_thr": 57,
+        "n_events_alerted": 45,
+        "recall": 0.7894736842105263,
+        "fn_peak_real_mean": 42.654008070627846,
+        "fn_peak_real_max": 72.11519622802734
+      },
+      "at_50_mgd": {
+        "threshold_mgd": 50.0,
+        "n_events_with_y_true_ge_thr": 23,
+        "n_events_alerted": 6,
+        "recall": 0.2608695652173913,
+        "fn_peak_real_mean": 72.05995806525735,
+        "fn_peak_real_max": 104.79949951171875
+      }
+    },
+    "quantile_coverage": null
+  },
+  "comparison_TCN_vs_XGB_H3": {
+    "tcn_nse_h3": 0.6096314927236155,
+    "xgb_inline_nse_h3": 0.6888525275783748,
+    "xgb_iter17_nse_h3": 0.6871,
+    "delta_nse_vs_iter17": -0.07746850727638455,
+    "delta_nse_vs_inline": -0.07922103485475929,
+    "criterion_threshold": 0.02,
+    "sanity_xgb_inline_vs_iter17_delta": 0.0017525275783747407,
+    "verdict_h3": "XGB_WINS",
+    "verdict_explanation": "TCN A0 H=3 NO supera a XGB iter17 H=3 (delta=-0.0775 < umbral +0.02). El TCN no replica la ganancia de H=1 al alargar el horizonte; A0 queda confirmado como modelo principal solo en H=1."
+  }
+}
