@@ -216,3 +216,7 @@ outputs/figures/
 configs/local*.yaml
 
 outputs/cache/*.parquet
+
+# Model checkpoints (regenerable, do not version)
+*.pt
+*.pth
