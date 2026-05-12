@@ -51,14 +51,12 @@ The deployed system has three components, all closed and merged to `main`:
 ```
 stormflow-prediction/
 ├── README.md                     This document.
-├── CLAUDE.md / AGENTS.md         Project entry point and permanent context.
 ├── requirements.txt              Python dependencies.
 ├── configs/default.yaml          Data paths (resolved at runtime in Colab).
 ├── docs/
 │   ├── STATE.md                  Current project status (production models, metrics).
 │   ├── EXPERIMENTS.md            Full iteration history (iter1 to iter19c).
-│   ├── DATASET_STATS.md          Statistical summary of the dataset.
-│   └── WORKFLOW.md               How to run the project (Colab, Git, Drive).
+│   └── DATASET_STATS.md          Statistical summary of the dataset.
 ├── src/
 │   ├── data/                     Loading and cleaning of .tsf files.
 │   ├── features/                 Feature engineering (rainfall aggregations, API, calendar).

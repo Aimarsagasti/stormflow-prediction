@@ -220,3 +220,6 @@ outputs/cache/*.parquet
 # Model checkpoints (regenerable, do not version)
 *.pt
 *.pth
+
+# Claude Code local settings (personal)
+.claude/

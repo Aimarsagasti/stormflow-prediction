@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(python -c ' *)",
-      "Bash(python scripts/diagnostic/s2_baselines.py)",
-      "Bash(python *)"
-    ]
-  }
-}
